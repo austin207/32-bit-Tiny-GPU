@@ -7,3 +7,5 @@ sim_build/
 # Ignore Python compiled files (extra safety)
 *.pyc
 *.pyo
+# Test results
+results.xml
