@@ -1,0 +1,11 @@
+<testsuites name="results">
+  <testsuite name="all" package="all">
+    <property name="random_seed" value="1777378167" />
+    <testcase name="test_ADD" classname="test_alu" file="/home/austi/gpu-project/Src/alu/test_alu.py" lineno="7" time="0.0003056526184082031" sim_time_ns="1.0" ratio_time="3271.687987519501" />
+    <testcase name="test_SUB" classname="test_alu" file="/home/austi/gpu-project/Src/alu/test_alu.py" lineno="21" time="6.175041198730469e-05" sim_time_ns="1.0" ratio_time="16194.223938223939" />
+    <testcase name="test_CMP_equal" classname="test_alu" file="/home/austi/gpu-project/Src/alu/test_alu.py" lineno="35" time="7.557868957519531e-05" sim_time_ns="1.0" ratio_time="13231.242902208201" />
+    <testcase name="test_CMP_greater" classname="test_alu" file="/home/austi/gpu-project/Src/alu/test_alu.py" lineno="49" time="5.2928924560546875e-05" sim_time_ns="1.0" ratio_time="18893.26126126126" />
+    <testcase name="test_CMP_less" classname="test_alu" file="/home/austi/gpu-project/Src/alu/test_alu.py" lineno="63" time="5.125999450683594e-05" sim_time_ns="1.0" ratio_time="19508.39069767442" />
+    <testcase name="test_NOT" classname="test_alu" file="/home/austi/gpu-project/Src/alu/test_alu.py" lineno="77" time="5.2928924560546875e-05" sim_time_ns="1.0" ratio_time="18893.26126126126" />
+  </testsuite>
+</testsuites>

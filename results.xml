@@ -1,0 +1,9 @@
+<testsuites name="results">
+  <testsuite name="all" package="all">
+    <property name="random_seed" value="1777217619" />
+    <testcase name="test_registers" classname="test_registers" file="/home/austi/gpu-project/Src/test_registers.py" lineno="5" time="0.0005815029144287109" sim_time_ns="30.0" ratio_time="51590.455104551045" />
+    <testcase name="test_write_and_read" classname="test_registers" file="/home/austi/gpu-project/Src/test_registers.py" lineno="29" time="0.0003077983856201172" sim_time_ns="40.0" ratio_time="129955.19752130132" />
+    <testcase name="test_R0_is_Zero" classname="test_registers" file="/home/austi/gpu-project/Src/test_registers.py" lineno="56" time="0.0002334117889404297" sim_time_ns="30.0" ratio_time="128528.21246169561" />
+    <testcase name="test_Hardware_injected" classname="test_registers" file="/home/austi/gpu-project/Src/test_registers.py" lineno="81" time="0.00012540817260742188" sim_time_ns="10.0" ratio_time="79739.61977186312" />
+  </testsuite>
+</testsuites>

@@ -1,0 +1,9 @@
+# Ignore all __pycache__ folders anywhere
+__pycache__/
+
+# Ignore all sim_build folders anywhere
+sim_build/
+
+# Ignore Python compiled files (extra safety)
+*.pyc
+*.pyo
