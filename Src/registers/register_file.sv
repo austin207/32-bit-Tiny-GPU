@@ -15,8 +15,8 @@ module registers (
 logic [31:0] reg_file [0:31];
 
 initial begin
-    $dumpfile("pc.vcd");
-    $dumpvars(0, pc);
+    $dumpfile("register_file.vcd");
+    $dumpvars(0, registers);
 end
 
 /*

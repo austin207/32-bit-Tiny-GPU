@@ -17,12 +17,27 @@ module decoder (
 );
 
 initial begin
-    $dumpfile("pc.vcd");
-    $dumpvars(0, pc);
+    $dumpfile("decoder.vcd");
+    $dumpvars(0, decoder);
 end
 
 always_comb begin 
+    opcode = instruction[31:26];
+    rd_addr = instruction[25:21];
+    rs1_addr = instruction[20:16];
+    rs2_addr = instruction[15:11];
+    rs3_addr = instruction[10:6];
+    imm = instruction[15:0];
+    nzp_mask = instruction[25:23];
+    branch_offset = instruction[22:0];
     
+    ret = 0;
+    write_back_en = 0;
+    mem_read_en = 0;
+    mem_write_en = 0;
+    branch_en = 0;
+    nzp_en = 0;
+
 end
     
 endmodule

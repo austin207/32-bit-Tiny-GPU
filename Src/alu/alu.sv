@@ -8,8 +8,8 @@ module alu (
 );
 
 initial begin
-    $dumpfile("pc.vcd");
-    $dumpvars(0, pc);
+    $dumpfile("alu.vcd");
+    $dumpvars(0, alu);
 end
 
 always_comb begin
