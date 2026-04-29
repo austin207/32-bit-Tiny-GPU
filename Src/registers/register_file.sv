@@ -14,6 +14,11 @@ module registers (
 );
 logic [31:0] reg_file [0:31];
 
+initial begin
+    $dumpfile("pc.vcd");
+    $dumpvars(0, pc);
+end
+
 /*
 Register write logic
 - On reset, all registers (except the hardwired ones) are set to zero
