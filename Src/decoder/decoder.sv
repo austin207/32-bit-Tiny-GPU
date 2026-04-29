@@ -38,6 +38,36 @@ always_comb begin
     branch_en = 0;
     nzp_en = 0;
 
+    case (opcode)
+        6'h00: begin // NOP
+            
+        end
+        6'h01, 6'h02, 6'h03, 6'h04, 6'h05, 6'h06, 6'h07, 6'h08, 6'h09, 6'h0A, 6'h0B, 6'h0C: begin // ALU operations
+            write_back_en = 1; 
+        end
+        6'h0D: begin // CMP
+            nzp_en = 1; 
+        end
+        6'h0E: begin // Branching instructions
+            branch_en = 1;
+        end
+        6'h0F: begin // LOAD
+            mem_read_en = 1; 
+            write_back_en = 1; 
+        end
+        6'h10: begin // STORE
+            mem_write_en = 1;
+        end
+        6'h11: begin // CONST
+            write_back_en = 1; 
+        end
+        6'h12: begin // RET
+            ret = 1; 
+        end
+        default: begin 
+        end 
+    endcase
+
 end
     
 endmodule
