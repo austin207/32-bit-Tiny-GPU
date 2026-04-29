@@ -52,7 +52,7 @@ typedef enum logic {
                     state <= IDLE;
                 end 
             end
-            default: 
+            default: ;
         endcase        
     end
  end
