@@ -1,0 +1,49 @@
+$date
+	Sat May  2 06:55:32 2026
+$end
+$version
+	Icarus Verilog
+$end
+$timescale
+	1ps
+$end
+$scope module memory_controller $end
+$var wire 4 ! mem_resp_valid [3:0] $end
+$var wire 4 " read_write_switch [3:0] $end
+$var wire 4 # req_avail [3:0] $end
+$var parameter 32 $ NUM_CORES $end
+$var parameter 32 % THREADS_PER_CORE $end
+$var parameter 64 & TOTAL_THREADS $end
+$var reg 4 ' mem_req_rw [3:0] $end
+$var reg 4 ( mem_req_valid [3:0] $end
+$var reg 4 ) resp_valid [3:0] $end
+$scope begin $ivl_for_loop0 $end
+$var integer 32 * i [31:0] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+$comment Show the parameter values. $end
+$dumpall
+b100 &
+b100 %
+b1 $
+$end
+#0
+$dumpvars
+b100 *
+bz )
+b1 (
+b1 '
+b1 #
+b1 "
+bz !
+$end
+#1001
+b0 '
+b100 *
+b0 "
+#2002
+b1 )
+b100 *
+b1 !
+#3002
