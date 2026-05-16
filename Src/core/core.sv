@@ -24,11 +24,6 @@ module core #(
     input logic [31:0] data_mem_resp_data [THREADS_PER_CORE-1:0]
 );
 
-initial begin
-    $dumpfile("core.vcd");
-    $dumpvars(0, core);
-end
-
 // Scheduler outputs
 logic fetcher_en, lsu_en, execute_en, write_back_en_sched;
 logic [2:0] current_state;
