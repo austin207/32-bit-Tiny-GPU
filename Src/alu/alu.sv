@@ -7,11 +7,6 @@ module alu (
     output logic [2:0] nzp_flag
 );
 
-initial begin
-    $dumpfile("alu.vcd");
-    $dumpvars(0, alu);
-end
-
 always_comb begin
     result = 32'b0; 
     nzp_flag = 3'b000;

@@ -20,11 +20,6 @@ module lsu (
     output logic read_write_switch
 );
 
-initial begin
-    $dumpfile("lsu.vcd");
-    $dumpvars(0, lsu);
-end
-
 logic is_read;
 
 typedef enum logic { 

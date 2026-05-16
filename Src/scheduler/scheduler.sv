@@ -21,11 +21,6 @@ module scheduler #(
     output logic block_done
 );
 
-initial begin
-    $dumpfile("scheduler.vcd");
-    $dumpvars(0, scheduler);
-end
-
 typedef enum logic [2:0] { 
     IDLE    = 3'b000,
     FETCH   = 3'b001,

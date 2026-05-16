@@ -11,12 +11,6 @@ module pc (
 
 logic [2:0] nzp_reg;
 
-initial begin
-    $dumpfile("pc.vcd");
-    $dumpvars(0, pc);
-end
-
-
 always_ff @( posedge clk or posedge rst ) begin 
     if (rst) begin
         pc_out <= 32'b0;

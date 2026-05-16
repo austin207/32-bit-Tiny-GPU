@@ -25,11 +25,6 @@ module memory_controller #(
     input logic [31:0] mem_resp_data [TOTAL_THREADS-1:0]
 );
 
-initial begin
-    $dumpfile("memory_controller.vcd");
-    $dumpvars(0, memory_controller);
-end
-
 always_comb begin
     for (int i = 0; i < TOTAL_THREADS; i++) begin
         mem_req_valid[i] = req_avail[i];

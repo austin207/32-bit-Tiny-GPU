@@ -13,11 +13,6 @@ module fetcher (
     input logic [31:0] resp_data
 );
 
-initial begin
-    $dumpfile("fetcher.vcd");
-    $dumpvars(0, fetcher);
-end
-
 typedef enum logic { 
     IDLE = 1'b0,
     WAITING = 1'b1

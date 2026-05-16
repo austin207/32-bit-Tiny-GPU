@@ -16,11 +16,6 @@ module decoder (
     output logic nzp_en
 );
 
-initial begin
-    $dumpfile("decoder.vcd");
-    $dumpvars(0, decoder);
-end
-
 always_comb begin 
     opcode = instruction[31:26];
     rd_addr = instruction[25:21];

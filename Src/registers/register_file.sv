@@ -3,6 +3,7 @@ module registers (
     input logic rst,
     input logic [4:0] r_addr1,
     input logic [4:0] r_addr2,
+    input logic [4:0] r_addr3,
     input logic [4:0] w_addr,
     input logic [31:0] w_data,
     input logic w_en,
@@ -10,14 +11,10 @@ module registers (
     input logic [31:0] blockIdx,
     input logic [31:0] blockDim,
     output logic [31:0] r_data1,
-    output logic [31:0] r_data2
+    output logic [31:0] r_data2,
+    output logic [31:0] r_data3
 );
 logic [31:0] reg_file [0:31];
-
-initial begin
-    $dumpfile("register_file.vcd");
-    $dumpvars(0, registers);
-end
 
 /*
 Register write logic
@@ -64,6 +61,16 @@ always_comb begin : read_port_2
        5'd30: r_data2 = blockIdx;  
        5'd31: r_data2 = blockDim;  
         default: r_data2 = reg_file[r_addr2];
+    endcase
+end
+
+always_comb begin : read_port_3
+    case (r_addr3)
+       5'd0: r_data3 = 32'b0; 
+       5'd29: r_data3 = threadIdx; 
+       5'd30: r_data3 = blockIdx;  
+       5'd31: r_data3 = blockDim;  
+        default: r_data3 = reg_file[r_addr3];
     endcase
 end
 endmodule
