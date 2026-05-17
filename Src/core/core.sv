@@ -25,7 +25,7 @@ module core #(
 );
 
 // Scheduler outputs
-logic fetcher_en, lsu_en, execute_en, write_back_en_sched;
+logic fetcher_en, lsu_en, execute_en, write_back_en_sched, pc_en;
 logic [2:0] current_state;
 
 // Fetcher outputs
@@ -68,7 +68,8 @@ scheduler #(
     .execute_en(execute_en),
     .write_back_en(write_back_en_sched),
     .current_state(current_state),
-    .block_done(block_done)
+    .block_done(block_done),
+    .pc_en(pc_en)
 );
 
 fetcher fetch (
@@ -139,6 +140,7 @@ generate
         pc pc_inst(
             .clk(clk),
             .rst(rst),
+            .pc_en(pc_en),
             .branch_en(branch_en),
             .branch_offset(branch_offset),
             .nzp_en(nzp_en),

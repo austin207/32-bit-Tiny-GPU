@@ -18,7 +18,8 @@ module scheduler #(
     output logic execute_en,
     output logic write_back_en,
     output logic [2:0] current_state,
-    output logic block_done
+    output logic block_done,
+    output logic pc_en
 );
 
 typedef enum logic [2:0] { 
@@ -45,12 +46,14 @@ always_ff @( posedge clk or posedge rst ) begin
         execute_en <= 0;
         write_back_en <= 0;
         block_done <= 0;
+        pc_en <= 0;
     end else begin
         fetcher_en <= 0;
         lsu_en <= 0;
         execute_en <= 0;
         write_back_en <= 0;
         block_done <= 0;
+        pc_en <= 0;
         case (state)
            IDLE: begin
                 if (core_start) begin
@@ -91,6 +94,7 @@ always_ff @( posedge clk or posedge rst ) begin
                     state <= IDLE;
                 end else begin
                     state <= FETCH;
+                    pc_en <= 1;
                 end
                 write_back_en <= 1;
             end
