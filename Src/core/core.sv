@@ -52,6 +52,8 @@ logic [31:0] reg_data2 [THREADS_PER_CORE-1:0];
 logic [31:0] reg_data3 [THREADS_PER_CORE-1:0];
 logic [31:0] pc_out [THREADS_PER_CORE-1:0];
 
+logic [31:0] mem_addr [THREADS_PER_CORE-1:0];
+
 scheduler #(
     .THREADS_PER_CORE(THREADS_PER_CORE)
 ) shed (
@@ -76,7 +78,7 @@ fetcher fetch (
     .clk(clk),
     .rst(rst),
     .core_en(fetcher_en),
-    .pc_value(pc_out[0]), 
+    .pc_value(pc_out[0]),
     .instruction(instruction),
     .done(done),
     .req_valid(prog_mem_req_valid),
@@ -107,7 +109,9 @@ genvar i;
 logic [31:0] write_data [THREADS_PER_CORE-1:0];
 
 generate
-    for ( i = 0; i < THREADS_PER_CORE; i++ ) begin : thread_gen
+    for (i = 0; i < THREADS_PER_CORE; i++) begin : thread_gen
+
+        assign mem_addr[i] = reg_data1[i] + {{16{imm[15]}}, imm};
         assign write_data[i] = mem_read_en ? lsu_read_data[i] : alu_result[i];
 
         alu alu_inst(
@@ -125,8 +129,8 @@ generate
             .core_en(lsu_en),
             .mem_read_en(mem_read_en),
             .mem_write_en(mem_write_en),
-            .mem_data_address(alu_result[i]),
-            .mem_write_data(reg_data2[i]),
+            .mem_data_address(mem_addr[i]),
+            .mem_write_data(reg_data3[i]),
             .req_valid(data_mem_req_valid[i]),
             .req_addr(data_mem_req_addr[i]),
             .read_write_switch(data_mem_req_rw[i]),
@@ -155,7 +159,7 @@ generate
             .w_addr(rd_addr),
             .r_addr1(rs1_addr),
             .r_addr2(rs2_addr),
-            .r_addr3(rs3_addr),
+            .r_addr3(mem_write_en ? rd_addr : rs3_addr),
             .w_data(write_data[i]),
             .w_en(write_back_en_sched),
             .threadIdx(32'(i)),
