@@ -59,7 +59,9 @@ always_ff @( posedge clk or posedge rst ) begin
                 end
             end
             FETCH: begin
+                fetcher_en <= 1;
                 if (fetcher_done) begin
+                    fetcher_en <= 0;
                     state <= DECODE;
                 end
             end

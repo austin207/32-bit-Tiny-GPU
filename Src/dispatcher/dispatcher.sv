@@ -55,7 +55,7 @@ always_ff @(posedge clk or posedge rst) begin
         end
         active_blocks <= active_blocks + delta;
 
-        if (next_block == num_blocks && active_blocks == 0) begin
+        if (next_block == num_blocks && active_blocks == 0 && num_blocks > 0) begin
             kernel_done <= 1;
         end
     end
