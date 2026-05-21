@@ -33,7 +33,7 @@ logic [31:0] num_blocks;
 logic [31:0] blockDim;
 logic start;
 logic [NUM_CORES-1:0] core_start;
-logic [31:0] blockIdx_out [NUM_CORES-1:0];
+logic [NUM_CORES-1:0][31:0] blockIdx_out;   
 logic [NUM_CORES-1:0] block_done;
 
 dcr dcr_inst (
@@ -70,6 +70,10 @@ generate
         logic [31:0] core_data_req_data [THREADS_PER_CORE-1:0];
         logic [THREADS_PER_CORE-1:0] core_data_resp_valid;
         logic [31:0] core_data_resp_data [THREADS_PER_CORE-1:0];
+        logic [31:0] prog_mem_req_addr_wire;
+        logic [31:0] prog_mem_resp_data_wire;
+        assign prog_mem_req_addr[i] = prog_mem_req_addr_wire;
+        assign prog_mem_resp_data_wire = prog_mem_resp_data[i];
 
         // Connect intermediate wires to top-level arrays
         genvar j;
@@ -86,13 +90,13 @@ generate
             .clk(clk),
             .rst(rst),
             .core_start(core_start[i]),
-            .blockIdx(blockIdx_out[i]),
+            .blockIdx(blockIdx_out[i]),          // CHANGED: direct packed slice, no wire
             .blockDim(blockDim),
             .block_done(block_done[i]),
             .prog_mem_req_valid(prog_mem_req_valid[i]),
-            .prog_mem_req_addr(prog_mem_req_addr[i]),
+            .prog_mem_req_addr(prog_mem_req_addr_wire),
             .prog_mem_resp_valid(prog_mem_resp_valid[i]),
-            .prog_mem_resp_data(prog_mem_resp_data[i]),
+            .prog_mem_resp_data(prog_mem_resp_data_wire),
             .data_mem_req_valid(core_data_req_valid),
             .data_mem_req_addr(core_data_req_addr),
             .data_mem_req_rw(core_data_req_rw),

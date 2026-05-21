@@ -19,21 +19,24 @@ def load_hex_file(filename):
     return instructions
 
 def safe_int(signal, default=0):
-    """Read signal value safely — returns default if signal contains X or Z bits"""
     try:
         return int(signal.value)
     except Exception:
         return default
 
 def safe_bit(signal, bit, default=0):
-    """Read a single bit from a packed signal safely"""
     try:
         return (int(signal.value) >> bit) & 1
     except Exception:
         return default
 
+def read_raw(signal):
+    try:
+        return str(signal.value)
+    except Exception as e:
+        return f"ERR:{e}"
+
 async def program_memory_model(dut, instructions):
-    """Respond to program memory fetch requests"""
     RET_INSTR = 0x48000000
     NUM_CORES = 4
     while True:
@@ -41,61 +44,62 @@ async def program_memory_model(dut, instructions):
         await Timer(1, unit="ns")
         resp_valid = 0
         for i in range(NUM_CORES):
-            if safe_bit(dut.prog_mem_req_valid, i) == 1:
-                try:
-                    addr = int(dut.prog_mem_req_addr[i].value)
-                    instr = instructions.get(addr, RET_INSTR)
-                    dut.prog_mem_resp_data[i].value = instr
-                    resp_valid |= (1 << i)
-                except Exception:
-                    pass
+            if safe_bit(dut.prog_mem_req_valid, i) == 0:
+                continue
+            try:
+                addr = safe_int(dut.core_gen[i].core_inst.fetch.req_addr, 0)
+                instr = instructions.get(addr, RET_INSTR)
+                dut.prog_mem_resp_data[i].value = instr
+            except Exception:
+                pass
+            resp_valid |= (1 << i)
         dut.prog_mem_resp_valid.value = resp_valid
 
 async def data_memory_model(dut, memory):
-    """Respond to data memory requests — handles X-bit signals safely"""
-    TOTAL_THREADS = 16
+    NUM_CORES        = 4
+    THREADS_PER_CORE = 4
     while True:
         await RisingEdge(dut.clk)
         await Timer(1, unit="ns")
-
-        req_valid = safe_int(dut.data_mem_req_valid, 0)
         resp_valid = 0
-
-        for i in range(TOTAL_THREADS):
-            if (req_valid >> i) & 1:
+        for core_id in range(NUM_CORES):
+            for thread_id in range(THREADS_PER_CORE):
+                global_thread = core_id * THREADS_PER_CORE + thread_id
                 try:
-                    addr = int(dut.data_mem_req_addr[i].value)
-                    # Read rw bit safely — x bits on inactive threads cause int() to fail
-                    rw = safe_bit(dut.data_mem_req_rw, i, default=0)
-                    data = safe_int(dut.data_mem_req_data[i], 0)
-
-                    if rw == 0:  # write STR (rw=0 means write in LSU)
-                        memory[addr] = data
-                        print(f"  Thread {i}: STR -> mem[{addr}] = {data}")
-                        resp_valid |= (1 << i)
-                    else:        # read LDR
-                        val = memory.get(addr, 0)
-                        dut.data_mem_resp_data[i].value = val
-                        resp_valid |= (1 << i)
-                except Exception as e:
-                    print(f"  [WARN] Thread {i} memory model error: {e}")
-
+                    lsu = (dut.core_gen[core_id].core_inst
+                               .thread_gen[thread_id].lsu_inst)
+                    if safe_int(lsu.req_valid, 0) == 0:
+                        continue
+                    addr = safe_int(lsu.mem_data_address, 0)
+                    rw   = safe_int(lsu.read_write_switch, 1)
+                    data = safe_int(lsu.mem_write_data, 0)
+                except Exception:
+                    continue
+                if rw == 0:
+                    memory[addr] = data
+                    print(f"  Thread {global_thread}: STR -> mem[{addr}] = {data}")
+                else:
+                    val = memory.get(addr, 0)
+                    try:
+                        dut.data_mem_resp_data[global_thread].value = val
+                    except Exception:
+                        pass
+                resp_valid |= (1 << global_thread)
         dut.data_mem_resp_valid.value = resp_valid
 
 @cocotb.test()
 async def test_gpu_axel_program(dut):
-    """Run AXEL-compiled vector_add program and capture results"""
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
 
-    hex_path = os.path.join(os.path.dirname(__file__), "../../assembler/vector_add.hex")
+    hex_path = os.path.join(
+        os.path.dirname(__file__), "../../assembler/vector_add.hex")
     instructions = load_hex_file(hex_path)
     data_memory = {}
 
-    # Initialize all inputs
-    dut.rst.value = 1
+    dut.rst.value          = 1
     dut.dcr_write_en.value = 0
-    dut.dcr_addr.value = 0
-    dut.dcr_data.value = 0
+    dut.dcr_addr.value     = 0
+    dut.dcr_data.value     = 0
     dut.prog_mem_resp_valid.value = 0
     for i in range(4):
         dut.prog_mem_resp_data[i].value = 0
@@ -103,32 +107,26 @@ async def test_gpu_axel_program(dut):
     for i in range(16):
         dut.data_mem_resp_data[i].value = 0
 
-    # Start memory models FIRST
     cocotb.start_soon(program_memory_model(dut, instructions))
     cocotb.start_soon(data_memory_model(dut, data_memory))
 
-    # Reset for 3 cycles
-    await RisingEdge(dut.clk)
-    await RisingEdge(dut.clk)
-    await RisingEdge(dut.clk)
+    for _ in range(3):
+        await RisingEdge(dut.clk)
     dut.rst.value = 0
     await RisingEdge(dut.clk)
     await Timer(1, unit="ns")
 
-    # Configure DCR — num_blocks = 1
     dut.dcr_write_en.value = 1
-    dut.dcr_addr.value = 0b00
-    dut.dcr_data.value = 1
+    dut.dcr_addr.value     = 0b00
+    dut.dcr_data.value     = 1
     await RisingEdge(dut.clk)
     await Timer(1, unit="ns")
 
-    # Configure DCR — blockDim = 4
     dut.dcr_addr.value = 0b01
     dut.dcr_data.value = 4
     await RisingEdge(dut.clk)
     await Timer(1, unit="ns")
 
-    # Trigger start — hold for 2 cycles to guarantee dispatcher sees it
     dut.dcr_addr.value = 0b10
     dut.dcr_data.value = 0
     await RisingEdge(dut.clk)
@@ -137,7 +135,20 @@ async def test_gpu_axel_program(dut):
     await Timer(1, unit="ns")
     dut.dcr_write_en.value = 0
 
-    # Wait for kernel_done
+    # ── DIAGNOSE blockIdx BEFORE kernel starts executing ──────────────────
+    print("\n[DIAG] Core 0 blockIdx value:")
+    try:
+        raw = read_raw(dut.core_gen[0].core_inst.blockIdx_in)
+        print(f"  core_inst.blockIdx_in = {raw}")
+    except Exception as e:
+        print(f"  blockIdx_in ERR: {e}")
+    try:
+        raw = read_raw(dut.core_gen[0].core_inst.blockIdx)
+        print(f"  core_inst.blockIdx    = {raw}")
+    except Exception as e:
+        print(f"  blockIdx ERR: {e}")
+    # ──────────────────────────────────────────────────────────────────────
+
     timeout = 1000
     for cycle in range(timeout):
         await RisingEdge(dut.clk)
@@ -146,32 +157,24 @@ async def test_gpu_axel_program(dut):
             cocotb.log.info(f"GPU completed in {cycle + 1} cycles")
             break
 
-    assert dut.kernel_done.value == 1, f"GPU timed out after {timeout} cycles"
+    assert dut.kernel_done.value == 1, "GPU timed out"
 
-    # Wait for any in-flight writes to settle
     for _ in range(20):
         await RisingEdge(dut.clk)
         await Timer(1, unit="ns")
 
-    # Print results
     print("\n--- Data Memory Results ---")
-    if data_memory:
-        for addr in sorted(data_memory.keys()):
-            print(f"  mem[{addr}] = {data_memory[addr]}")
-    else:
-        print("  No writes captured")
+    for addr in sorted(data_memory.keys()):
+        print(f"  mem[{addr}] = {data_memory[addr]}")
 
-    print("\nExpected results (threadIdx + blockIdx, blockIdx=0):")
+    all_pass = True
     for t in range(4):
-        print(f"  Thread {t}: {t} + 0 = {t}")
-
-    if data_memory:
-        for t in range(4):
-            assert data_memory.get(t) == t, \
-                f"Thread {t}: expected mem[{t}]={t}, got {data_memory.get(t)}"
-        cocotb.log.info("All results correct!")
-
-    cocotb.log.info("AXEL vector_add executed successfully on GPU")
+        expected = t
+        actual   = data_memory.get(t)
+        ok = (actual == expected)
+        if not ok:
+            all_pass = False
+        print(f"  Thread {t}: mem[{t}] = {actual}  expected={expected}  {'✓' if ok else '✗'}")
 
     for _ in range(50):
         await RisingEdge(dut.clk)

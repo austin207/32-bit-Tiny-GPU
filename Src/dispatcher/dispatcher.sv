@@ -11,7 +11,7 @@ module dispatcher #(
     input logic [NUM_CORES-1:0] block_done,
 
     output logic [NUM_CORES-1:0] core_start,
-    output logic [31:0] blockIdx_out [NUM_CORES-1:0],
+    output logic [NUM_CORES-1:0][31:0] blockIdx_out,
     output logic kernel_done
 );
 
@@ -55,7 +55,7 @@ always_ff @(posedge clk or posedge rst) begin
         end
         active_blocks <= active_blocks + delta;
 
-        if (next_block == num_blocks && active_blocks == 0 && num_blocks > 0) begin
+        if (next_block == num_blocks && (active_blocks + delta) == 0 && num_blocks > 0) begin
             kernel_done <= 1;
         end
     end
