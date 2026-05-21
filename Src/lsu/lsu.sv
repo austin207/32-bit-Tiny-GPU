@@ -52,6 +52,7 @@ always_ff @( posedge clk or posedge rst ) begin
                         read_write_switch <= 1;
                         state <= WAITING;
                     end else if (mem_write_en) begin
+                        is_read <= 0;
                         req_addr <= mem_data_address;
                         req_valid <= 1;
                         read_write_switch <= 0;

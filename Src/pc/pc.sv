@@ -12,21 +12,18 @@ module pc (
 
 logic [2:0] nzp_reg;
 
-always_ff @( posedge clk or posedge rst ) begin 
+always_ff @(posedge clk or posedge rst) begin
     if (rst) begin
-        pc_out <= 32'b0;
+        pc_out  <= 32'b0;
         nzp_reg <= 3'b000;
-    end else if (nzp_en) begin
-        nzp_reg <= nzp_flag;
-    end else if (pc_en) begin   // only update when enabled
-        if (branch_en) begin
-            if ((nzp_reg & nzp_mask) != 0) begin
+    end else begin
+        if (nzp_en)
+            nzp_reg <= nzp_flag;
+        if (pc_en) begin
+            if (branch_en && (nzp_reg & nzp_mask) != 0)
                 pc_out <= pc_out + branch_offset;
-            end else begin
+            else
                 pc_out <= pc_out + 1;
-            end
-        end else begin
-            pc_out <= pc_out + 1;
         end
     end
 end
