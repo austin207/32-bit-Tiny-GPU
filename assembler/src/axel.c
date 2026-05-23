@@ -38,6 +38,10 @@ void axel_shr(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2) {
     emit_shr(&gpu->program, rd, rs1, rs2);
 }
 
+void axel_sar(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    emit_sar(&gpu->program, rd, rs1, rs2);
+}
+
 void axel_and(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2) {
     emit_and(&gpu->program, rd, rs1, rs2);
 }

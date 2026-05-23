@@ -28,6 +28,7 @@ always_comb begin
         nzp_flag = ($signed(operand1) - $signed(operand2)) == 0 ? 3'b010 : ($signed(operand1) - $signed(operand2)) > 0 ? 3'b001 : 3'b100;
        end 
        6'h13 : result = $signed(operand1) * $signed(operand2); // IMUL
+       6'h14 : result = $signed(operand1) >>> operand2; // SAR
        
         default:; //default vaule is already set to zero at top 
     endcase

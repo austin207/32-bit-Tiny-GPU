@@ -55,6 +55,10 @@ void emit_shr(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2) {
     prog->instructions[prog->count++] = encode_r(OP_SHR, rd, rs1, rs2, 0); 
 }
 
+void emit_sar(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    prog->instructions[prog->count++] = encode_r(OP_SAR, rd, rs1, rs2, 0);
+}
+
 void emit_and(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2) {
     prog->instructions[prog->count++] = encode_r(OP_AND, rd, rs1, rs2, 0); 
 }

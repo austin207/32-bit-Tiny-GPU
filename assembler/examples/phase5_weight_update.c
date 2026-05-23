@@ -53,24 +53,24 @@ int main() {
 
     axel_const(&gpu, R15, 4);               /* R15 = 4  (shift for lr=1/16)   */
 
-    /* W[i][0] -= (error * x[0]) >> 4 */
-    axel_imul(&gpu, R16, R4, R6);   // ← was axel_mul
-    axel_shr(&gpu, R16, R16, R15);
+    /* W[i][0] */
+    axel_imul(&gpu, R16, R4, R6);
+    axel_sar(&gpu, R16, R16, R15);   // ← change this to axel_sar
     axel_sub(&gpu, R11, R11, R16);
 
-    /* W[i][1] -= (error * x[1]) >> 4 */
-    axel_imul(&gpu, R16, R4, R7);   // ← was axel_mul
-    axel_shr(&gpu, R16, R16, R15);
+    /* W[i][1] */
+    axel_imul(&gpu, R16, R4, R7);
+    axel_sar(&gpu, R16, R16, R15);   // ← change this to axel_sar
     axel_sub(&gpu, R12, R12, R16);
 
-    /* W[i][2] -= (error * x[2]) >> 4 */
-    axel_imul(&gpu, R16, R4, R8);   // ← was axel_mul
-    axel_shr(&gpu, R16, R16, R15);
+    /* W[i][2] */
+    axel_imul(&gpu, R16, R4, R8);
+    axel_sar(&gpu, R16, R16, R15);   // ← change this to axel_sar
     axel_sub(&gpu, R13, R13, R16);
 
-    /* W[i][3] -= (error * x[3]) >> 4 */
-    axel_imul(&gpu, R16, R4, R9);   // ← was axel_mul
-    axel_shr(&gpu, R16, R16, R15);
+    /* W[i][3] */
+    axel_imul(&gpu, R16, R4, R9);
+    axel_sar(&gpu, R16, R16, R15);   // ← change this to axel_sar
     axel_sub(&gpu, R14, R14, R16);
 
     /* Write updated weights back */

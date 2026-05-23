@@ -60,6 +60,7 @@ void axel_div(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_mod(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_shl(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_shr(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
+void axel_sar(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_and(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_or(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_xor(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);

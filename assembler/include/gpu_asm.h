@@ -23,6 +23,7 @@
 #define OP_CONST 0x11
 #define OP_RET 0x12
 #define OP_IMUL 0x13
+#define OP_SAR 0x14
 
 typedef struct {
     uint32_t instructions[256];
@@ -40,6 +41,7 @@ void emit_div(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_mod(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_shl(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_shr(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
+void emit_sar(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_and(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_or(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_xor(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
