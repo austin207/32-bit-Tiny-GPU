@@ -54,6 +54,10 @@ void axel_not(AxelGPU *gpu, uint8_t rd, uint8_t rs) {
     emit_not(&gpu->program, rd, rs);
 }
 
+void axel_imul(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    emit_imul(&gpu->program, rd, rs1, rs2);
+}
+
 void axel_cmp(AxelGPU *gpu, uint8_t rs1, uint8_t rs2) {
     emit_cmp(&gpu->program, rs1, rs2);
 }

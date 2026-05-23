@@ -55,6 +55,7 @@ void axel_compile(AxelGPU *gpu, const char *filename);
 void axel_add(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_sub(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_mul(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
+void axel_imul(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_div(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_mod(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_shl(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);

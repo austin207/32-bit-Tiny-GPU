@@ -22,6 +22,7 @@
 #define OP_STR 0x10
 #define OP_CONST 0x11
 #define OP_RET 0x12
+#define OP_IMUL 0x13
 
 typedef struct {
     uint32_t instructions[256];
@@ -34,6 +35,7 @@ void gpu_program_write(GPUProgram *prog, const char *filename);
 void emit_add(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_sub(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_mul(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
+void emit_imul(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_div(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_mod(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_shl(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);

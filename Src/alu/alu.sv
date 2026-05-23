@@ -27,6 +27,7 @@ always_comb begin
         result = 0;
         nzp_flag = ($signed(operand1) - $signed(operand2)) == 0 ? 3'b010 : ($signed(operand1) - $signed(operand2)) > 0 ? 3'b001 : 3'b100;
        end 
+       6'h13 : result = $signed(operand1) * $signed(operand2); // IMUL
        
         default:; //default vaule is already set to zero at top 
     endcase

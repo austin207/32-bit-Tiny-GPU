@@ -79,6 +79,10 @@ void emit_fma(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2, uint8_t rs
     prog->instructions[prog->count++] = encode_r(OP_FMA, rd, rs1, rs2, rs3); 
 }
 
+void emit_imul(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    prog->instructions[prog->count++] = encode_r(OP_IMUL, rd, rs1, rs2, 0);
+}
+
 void emit_ldr(GPUProgram *prog, uint8_t rd, uint8_t rs, uint16_t imm) {
     prog->instructions[prog->count++] = encode_i(OP_LDR, rd, rs, imm); 
 }

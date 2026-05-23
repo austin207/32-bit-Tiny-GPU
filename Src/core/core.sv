@@ -112,7 +112,9 @@ generate
     for (i = 0; i < THREADS_PER_CORE; i++) begin : thread_gen
 
         assign mem_addr[i] = reg_data1[i] + {{16{imm[15]}}, imm};
-        assign write_data[i] = mem_read_en ? lsu_read_data[i] : alu_result[i];
+        assign write_data[i] = mem_read_en        ? lsu_read_data[i]  :
+                       (opcode == 6'h11)  ? {16'b0, imm}      :
+                       alu_result[i];
 
         alu alu_inst(
             .operand1(reg_data1[i]),
