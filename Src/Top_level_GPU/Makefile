@@ -15,3 +15,7 @@ COCOTB_TEST_MODULES = test_top_level_gpu
 SIM = icarus
 export PYTHONPATH := $(shell pwd):$(PYTHONPATH)
 include $(shell cocotb-config --makefiles)/Makefile.sim
+
+infer:
+	rm -f results.xml
+	$(MAKE) results.xml COCOTB_TEST_MODULES=inference
