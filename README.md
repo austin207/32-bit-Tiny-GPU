@@ -187,7 +187,7 @@ gpu #(
 
 ## AXEL Assembler
 
-AXEL (Austin's eXecution Engine Layer) is a C library that emits `.hex` kernel files for the GPU. It provides two layers: `gpu_asm` (low-level `emit_*` functions) and `axel` (higher-level kernel API with register name aliases).
+AXEL is a C library that emits `.hex` kernel files for the GPU. It provides two layers: `gpu_asm` (low-level `emit_*` functions) and `axel` (higher-level kernel API with register name aliases).
 
 ### Build
 
