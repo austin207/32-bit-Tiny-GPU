@@ -9,3 +9,6 @@ sim_build/
 *.pyo
 # Test results
 results.xml
+
+# VCD files
+*.vcd
