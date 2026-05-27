@@ -1,7 +1,7 @@
 // gpu_fpga_top.sv — Tang Nano 20K wrapper for 32-bit Tiny GPU
 //
 // Clock architecture:
-//   clk      = 27 MHz board oscillator (pin 52)
+//   clk      = 27 MHz board oscillator (pin 4, LVCMOS18)
 //   clk_slow = 27 MHz / 8 = 3.375 MHz  → fed to GPU and all memory models
 //
 // Why clk_slow?
@@ -21,9 +21,9 @@
 //   led[5:1] = rolling blink from heartbeat counter (board-alive indicator)
 
 module gpu_fpga_top (
-    input  wire       clk,    // 27 MHz, pin 52
-    input  wire       rst_n,  // active-low reset, pin 88 (S1 button)
-    output wire [5:0] led     // active-low LEDs, pins 10 11 13 14 15 16
+    input  wire       clk,    // 27 MHz, pin 4 (Tang Nano 20K oscillator, LVCMOS18)
+    input  wire       rst_n,  // active-low reset (power-on reset — no physical button)
+    output wire [5:0] led     // active-low LEDs, pins 15 16 17 18 19 20
 );
 
 localparam NUM_CORES        = 1;
@@ -84,6 +84,11 @@ wire [127:0] data_mem_req_data;
 wire [3:0]   data_mem_resp_valid;
 wire [127:0] data_mem_resp_data;
 
+// thread_keep_alive: synthesis observability guard from core module.
+// XOR of all 4 thread write_data paths — keeps per-thread ALU and register
+// file instances in the netlist by providing a traceable primary output path.
+wire [31:0] thread_keep_alive;
+
 // ─── GPU instance (runs on clk_slow) ─────────────────────────────────────────
 gpu #(
     .NUM_CORES(NUM_CORES),
@@ -104,7 +109,8 @@ gpu #(
     .data_mem_req_rw(data_mem_req_rw),
     .data_mem_req_data(data_mem_req_data),
     .data_mem_resp_valid(data_mem_resp_valid),
-    .data_mem_resp_data(data_mem_resp_data)
+    .data_mem_resp_data(data_mem_resp_data),
+    .thread_keep_alive(thread_keep_alive)
 );
 
 // ─── Auto-dispatch FSM (clk_slow domain) ─────────────────────────────────────
@@ -253,7 +259,11 @@ assign data_mem_resp_data  = data_data_r;
 reg [24:0] heartbeat;
 always @(posedge clk) heartbeat <= heartbeat + 25'd1;
 
-assign led[0]   = ~kernel_done;
+// thread_keep_alive[31]: synthesis observability anchor.
+// For Q8 positive values this bit is 0 at runtime so led[0] behaves as ~kernel_done.
+// Synthesis cannot prove this statically (depends on threadIdx runtime values),
+// so the full thread_keep_alive → write_data → alu → regfile chain is preserved.
+assign led[0]   = ~(kernel_done | thread_keep_alive[31]);
 assign led[5:1] = ~heartbeat[22:18];
 
 endmodule

@@ -28,7 +28,7 @@ from cocotb.triggers import Timer
 
 @cocotb.test()
 async def test_scheduler_basic_flow(dut):
-    clock = Clock(dut.clk, 10, units="ns")  
+    clock = Clock(dut.clk, 10, unit="ns")  
     cocotb.start_soon(clock.start())
 
     dut.rst.value = 1
@@ -65,7 +65,7 @@ async def test_scheduler_basic_flow(dut):
 
 @cocotb.test()
 async def test_scheduler_memory_flow(dut):
-    clock = Clock(dut.clk, 10, units="ns")  
+    clock = Clock(dut.clk, 10, unit="ns")  
     cocotb.start_soon(clock.start())
 
     dut.rst.value = 1
@@ -106,7 +106,7 @@ async def test_scheduler_memory_flow(dut):
 
 @cocotb.test()
 async def test_scheduler_ret_instruction(dut):
-    clock = Clock(dut.clk, 10, units="ns")  # 100 MHz clock
+    clock = Clock(dut.clk, 10, unit="ns")  # 100 MHz clock
     cocotb.start_soon(clock.start())
 
     dut.rst.value = 1

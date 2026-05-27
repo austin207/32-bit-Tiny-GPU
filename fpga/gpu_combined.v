@@ -1,4 +1,4 @@
-module alu (
+(* syn_dont_touch = 1 *) module alu (
 	operand1,
 	operand2,
 	operand3,
@@ -44,7 +44,7 @@ module alu (
 	initial _sv2v_0 = 0;
 endmodule
 
-module registers (
+(* syn_dont_touch = 1 *) module registers (
 	clk,
 	rst,
 	r_addr1,
@@ -122,7 +122,7 @@ module registers (
 	initial _sv2v_0 = 0;
 endmodule
 
-module pc (
+(* syn_dont_touch = 1 *) module pc (
 	clk,
 	rst,
 	pc_en,
@@ -538,7 +538,8 @@ module core (
 	data_mem_req_rw,
 	data_mem_req_data,
 	data_mem_resp_valid,
-	data_mem_resp_data
+	data_mem_resp_data,
+	thread_keep_alive
 );
 	parameter THREADS_PER_CORE = 4;
 	input wire clk;
@@ -547,6 +548,7 @@ module core (
 	input wire [31:0] blockIdx;
 	input wire [31:0] blockDim;
 	output wire block_done;
+	output wire [31:0] thread_keep_alive;
 	output wire prog_mem_req_valid;
 	output wire [31:0] prog_mem_req_addr;
 	input wire prog_mem_resp_valid;
@@ -595,7 +597,7 @@ module core (
 	(* syn_keep=1 *) wire [31:0] reg_data1 [THREADS_PER_CORE - 1:0];
 	(* syn_keep=1 *) wire [31:0] reg_data2 [THREADS_PER_CORE - 1:0];
 	(* syn_keep=1 *) wire [31:0] reg_data3 [THREADS_PER_CORE - 1:0];
-	(* syn_keep=1 *) wire [31:0] pc_out    [THREADS_PER_CORE - 1:0];
+	wire [31:0] pc_shared; // single shared PC (SIMD: all threads same instruction)
 	(* syn_keep=1 *) wire [31:0] mem_addr  [THREADS_PER_CORE - 1:0];
 
 	scheduler #(.THREADS_PER_CORE(THREADS_PER_CORE)) shed(
@@ -620,7 +622,7 @@ module core (
 		.clk(clk),
 		.rst(rst),
 		.core_en(fetcher_en),
-		.pc_value(pc_out[0]),
+		.pc_value(pc_shared),
 		.instruction(instruction),
 		.done(done),
 		.req_valid(prog_mem_req_valid),
@@ -657,7 +659,7 @@ module core (
 			assign mem_addr[i]   = reg_data1[i] + {{16 {imm[15]}}, imm};
 			assign write_data[i] = (mem_read_en ? lsu_read_data[i] : (opcode == 6'h11 ? {16'b0000000000000000, imm} : alu_result[i]));
 
-			(* syn_noprune=1 *) alu alu_inst(
+			alu alu_inst(
 				.operand1(reg_data1[i]),
 				.operand2(reg_data2[i]),
 				.operand3(reg_data3[i]),
@@ -666,7 +668,7 @@ module core (
 				.nzp_flag(nzp_result[i])
 			);
 
-			(* syn_noprune=1 *) lsu lsu_inst(
+			lsu lsu_inst(
 				.clk(clk),
 				.rst(rst),
 				.core_en(lsu_en),
@@ -684,19 +686,8 @@ module core (
 				.mem_read_data(lsu_read_data[i])
 			);
 
-			(* syn_noprune=1 *) pc pc_inst(
-				.clk(clk),
-				.rst(rst),
-				.pc_en(pc_en),
-				.branch_en(branch_en),
-				.branch_offset(branch_offset),
-				.nzp_en(nzp_en),
-				.nzp_flag(nzp_result[i]),
-				.nzp_mask(nzp_mask),
-				.pc_out(pc_out[i])
-			);
 
-			(* syn_noprune=1 *) registers reg_file(
+			registers reg_file(
 				.clk(clk),
 				.rst(rst),
 				.w_addr(rd_addr),
@@ -714,6 +705,35 @@ module core (
 			);
 		end
 	endgenerate
+
+	// ── Shared PC (single instance for all threads) ─────────────────────────
+	// SIMD architecture: all threads execute the same instruction at the same
+	// program counter. Branch decision uses nzp_result[0] (thread 0 is
+	// representative since all threads run in lockstep with the same opcode).
+	// Moving to one shared PC eliminates the 3 dead per-thread PC instances
+	// that previously caused NL0002 sweep warnings.
+	pc pc_inst(
+		.clk(clk),
+		.rst(rst),
+		.pc_en(pc_en),
+		.branch_en(branch_en),
+		.branch_offset(branch_offset),
+		.nzp_en(nzp_en),
+		.nzp_flag(nzp_result[0]),   // thread 0 representative for SIMD branch
+		.nzp_mask(nzp_mask),
+		.pc_out(pc_shared)
+	);
+
+	// ── Thread-lane observability guard ─────────────────────────────────────
+	// thread_keep_alive = XOR of all threads write_data (alu_result path).
+	// This creates an unambiguous backward-analysis chain:
+	//   primary output LED ← thread_keep_alive ← write_data[1..3]
+	//                      ← alu_result[1..3]   ← alu_inst[1..3]   (KEPT)
+	//                      ← reg_data1[1..3]    ← reg_file[1..3]   (KEPT)
+	// Synthesis cannot prove alu_result[1..3] == alu_result[0] because
+	// threadIdx (a port input) gives each register file a distinct r29 value.
+	assign thread_keep_alive = write_data[0] ^ write_data[1] ^ write_data[2] ^ write_data[3];
+
 endmodule
 
 module dispatcher (
@@ -841,7 +861,8 @@ module gpu (
 	data_mem_req_rw,
 	data_mem_req_data,
 	data_mem_resp_valid,
-	data_mem_resp_data
+	data_mem_resp_data,
+	thread_keep_alive
 );
 	parameter NUM_CORES = 4;
 	parameter THREADS_PER_CORE = 4;
@@ -852,6 +873,7 @@ module gpu (
 	input wire [1:0] dcr_addr;
 	input wire [31:0] dcr_data;
 	output wire kernel_done;
+	output wire [31:0] thread_keep_alive;
 	output wire [NUM_CORES - 1:0] prog_mem_req_valid;
 	output wire [(NUM_CORES * 32) - 1:0] prog_mem_req_addr;
 	input wire [NUM_CORES - 1:0] prog_mem_resp_valid;
@@ -868,6 +890,9 @@ module gpu (
 	wire [NUM_CORES - 1:0] core_start;
 	wire [(NUM_CORES * 32) - 1:0] blockIdx_out;
 	wire [NUM_CORES - 1:0] block_done;
+	// Per-core thread_keep_alive signals; aggregated to gpu output.
+	wire [31:0] core_keep_alive [NUM_CORES - 1:0];
+	assign thread_keep_alive = core_keep_alive[0]; // core 0 (FPGA: NUM_CORES=1)
 	dcr dcr_inst(
 		.clk(clk),
 		.rst(rst),
@@ -929,7 +954,8 @@ module gpu (
 				.data_mem_req_rw(core_data_req_rw),
 				.data_mem_req_data(core_data_req_data),
 				.data_mem_resp_valid(core_data_resp_valid),
-				.data_mem_resp_data(core_data_resp_data)
+				.data_mem_resp_data(core_data_resp_data),
+				.thread_keep_alive(core_keep_alive[i])
 			);
 		end
 	endgenerate
