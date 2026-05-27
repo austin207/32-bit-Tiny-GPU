@@ -724,15 +724,19 @@ module core (
 		.pc_out(pc_shared)
 	);
 
-	// ── Thread-lane observability guard ─────────────────────────────────────
-	// thread_keep_alive = XOR of all threads write_data (alu_result path).
-	// This creates an unambiguous backward-analysis chain:
-	//   primary output LED ← thread_keep_alive ← write_data[1..3]
-	//                      ← alu_result[1..3]   ← alu_inst[1..3]   (KEPT)
-	//                      ← reg_data1[1..3]    ← reg_file[1..3]   (KEPT)
-	// Synthesis cannot prove alu_result[1..3] == alu_result[0] because
-	// threadIdx (a port input) gives each register file a distinct r29 value.
-	assign thread_keep_alive = write_data[0] ^ write_data[1] ^ write_data[2] ^ write_data[3];
+	// ── Thread-lane observability guard (parameterized) ─────────────────────
+	// XOR of all thread write_data — forces each thread's ALU and register
+	// file into the backward-analysis chain from the primary LED output.
+	// Uses a generate-based reduction so it works for any THREADS_PER_CORE.
+	genvar _gv_k;
+	wire [31:0] _keep_xor [THREADS_PER_CORE:0];
+	assign _keep_xor[0] = 32'b0;
+	generate
+		for (_gv_k = 0; _gv_k < THREADS_PER_CORE; _gv_k = _gv_k + 1) begin : keep_xor_gen
+			assign _keep_xor[_gv_k + 1] = _keep_xor[_gv_k] ^ write_data[_gv_k];
+		end
+	endgenerate
+	assign thread_keep_alive = _keep_xor[THREADS_PER_CORE];
 
 endmodule
 

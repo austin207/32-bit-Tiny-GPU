@@ -27,8 +27,12 @@ module gpu_fpga_top (
 );
 
 localparam NUM_CORES        = 1;
-localparam THREADS_PER_CORE = 4;
-localparam TOTAL_THREADS    = 4;
+// THREADS_PER_CORE=1 fits within Tang Nano 20K LUT budget.
+// 4 threads required 51,571 LUTs — 2.5× the 20,736 device limit.
+// Each thread adds ~12,000 LUTs (32-bit ALU × register file × LSU).
+// With 1 thread the GPU proves correctness: computes y[0] for threadIdx=0.
+localparam THREADS_PER_CORE = 1;
+localparam TOTAL_THREADS    = 1;
 localparam PROG_DEPTH       = 64;
 localparam DATA_DEPTH       = 32;
 
@@ -77,12 +81,12 @@ wire [31:0]  prog_mem_req_addr;
 wire [0:0]   prog_mem_resp_valid;
 wire [31:0]  prog_mem_resp_data;
 
-wire [3:0]   data_mem_req_valid;
-wire [127:0] data_mem_req_addr;
-wire [3:0]   data_mem_req_rw;
-wire [127:0] data_mem_req_data;
-wire [3:0]   data_mem_resp_valid;
-wire [127:0] data_mem_resp_data;
+wire [0:0]  data_mem_req_valid;  // 1 thread
+wire [31:0] data_mem_req_addr;
+wire [0:0]  data_mem_req_rw;
+wire [31:0] data_mem_req_data;
+wire [0:0]  data_mem_resp_valid;
+wire [31:0] data_mem_resp_data;
 
 // thread_keep_alive: synthesis observability guard from core module.
 // XOR of all 4 thread write_data paths — keeps per-thread ALU and register
@@ -196,58 +200,33 @@ end
 assign prog_mem_resp_valid = prog_resp_r;
 assign prog_mem_resp_data  = prog_data_r;
 
-// ─── Data memory: 4 BRAMs (4 threads, clk_slow domain) ──────────────────────
-// Each thread gets its own 32 × 32-bit BRAM, all initialized identically.
+// ─── Data memory: 1 BRAM (thread 0, clk_slow domain) ───────────────────────
+// Single thread — THREADS_PER_CORE=1. One 32×32-bit BRAM for thread 0.
 // Memory layout (addresses):
-//   0-15  : W[4][4] weights in Q8 (W[i][j] at addr i*4+j)
-//   16-19 : x[4] input vector in Q8
-//   20-23 : y[4] output (written by GPU during forward pass)
-//   24-27 : t[4] target vector in Q8
-//
-// rw=0 means WRITE (matches lsu.sv: read_write_switch=0 on the write path)
-// rw=1 means READ
-//
-// After kernel_done, thread N's BRAM holds y[N] at address 20+N.
+//   0-15 : W[4][4] weights Q8
+//   16-19: x[4] input vector Q8
+//   20   : y[0] output (thread 0 writes here)
+//   24-27: t[4] target vector Q8
 
 reg [31:0] data_bram_0 [0:DATA_DEPTH-1];
-reg [31:0] data_bram_1 [0:DATA_DEPTH-1];
-reg [31:0] data_bram_2 [0:DATA_DEPTH-1];
-reg [31:0] data_bram_3 [0:DATA_DEPTH-1];
+initial $readmemh("data_mem.hex", data_bram_0);
 
-initial begin
-    $readmemh("data_mem.hex", data_bram_0);
-    $readmemh("data_mem.hex", data_bram_1);
-    $readmemh("data_mem.hex", data_bram_2);
-    $readmemh("data_mem.hex", data_bram_3);
+reg        data_resp_r;
+reg [31:0] data_data_r;
+
+always @(posedge clk_slow or posedge rst_sync) begin
+    if (rst_sync) begin
+        data_resp_r <= 1'b0;
+        data_data_r <= 32'd0;
+    end else begin
+        if (data_mem_req_valid[0]) begin
+            if (data_mem_req_rw[0] == 1'b0)
+                data_bram_0[data_mem_req_addr[31:0]] <= data_mem_req_data[31:0];
+            data_data_r <= data_bram_0[data_mem_req_addr[31:0]];
+        end
+        data_resp_r <= data_mem_req_valid[0];
+    end
 end
-
-reg [3:0]   data_resp_r;
-reg [127:0] data_data_r;
-
-// BRAM macro: runs on clk_slow, handles read and write in same always block.
-// Write takes effect immediately on the rising edge.
-// Read data is registered one cycle later (resp_r delayed by 1).
-`define DATA_BRAM(T, BRAM)                                            \
-always @(posedge clk_slow or posedge rst_sync) begin                  \
-    if (rst_sync) begin                                                \
-        data_resp_r[T]          <= 1'b0;                               \
-        data_data_r[T*32 +: 32] <= 32'd0;                             \
-    end else begin                                                     \
-        if (data_mem_req_valid[T]) begin                               \
-            if (data_mem_req_rw[T] == 1'b0)                           \
-                BRAM[data_mem_req_addr[T*32 +: 32]] <=                 \
-                    data_mem_req_data[T*32 +: 32];                     \
-            data_data_r[T*32 +: 32] <=                                 \
-                BRAM[data_mem_req_addr[T*32 +: 32]];                  \
-        end                                                            \
-        data_resp_r[T] <= data_mem_req_valid[T];                       \
-    end                                                                \
-end
-
-`DATA_BRAM(0, data_bram_0)
-`DATA_BRAM(1, data_bram_1)
-`DATA_BRAM(2, data_bram_2)
-`DATA_BRAM(3, data_bram_3)
 
 assign data_mem_resp_valid = data_resp_r;
 assign data_mem_resp_data  = data_data_r;

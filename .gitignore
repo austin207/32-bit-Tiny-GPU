@@ -12,3 +12,6 @@ results.xml
 
 # VCD files
 *.vcd
+
+# Generated training/test output
+assembler/builds/weights.json
