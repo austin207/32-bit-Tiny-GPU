@@ -119,27 +119,43 @@ IMUL and SAR were added to support Q8 fixed-point gradient computation. SHR fill
 ## Module Breakdown
 
 ### 1. Register File (`register_file.sv`)
+![Register File Diagram](assets/Images-Components/Register-page-00001.jpg)
+
 32×32-bit storage. Synchronous write with reset (clears R1–R28). Asynchronous triple read (supports R-type and FMA). R0 hardwired to zero; R29/R30/R31 hardware injected.
 
 ### 2. ALU (`alu.sv`)
+![ALU Diagram](assets/Images-Components/ALU-page-00001.jpg)
+
 Pure combinational logic. Supports all 21 ISA operations including FMA (3-operand multiply-accumulate), IMUL (signed multiply), and SAR (arithmetic right shift). Outputs 32-bit result and 3-bit NZP flag. NZP encoding: N=100 (negative), Z=010 (zero), P=001 (positive).
 
 ### 3. Program Counter (`pc.sv`)
+![PC Diagram](assets/Images-Components/PC-page-00001.jpg)
+
 Per-thread instruction address register. Handles branch evaluation using NZP register. NZP register updated only on CMP via `nzp_en`. Uses independent `if` blocks for `nzp_en` and `pc_en` — critical for correct CMP+BRnzp sequencing.
 
 ### 4. Decoder (`decoder.sv`)
+![Decoder Diagram](assets/Images-Components/Decoder-page-00001.jpg)
+
 Pure combinational instruction decode. Extracts all fields from the 32-bit instruction word. Generates control signals: `write_back_en`, `mem_read_en`, `mem_write_en`, `branch_en`, `nzp_en`, `ret`.
 
 ### 5. Fetcher (`fetcher.sv`)
+![Fetcher Diagram](assets/Images-Components/Fetcher-page-00001.jpg)
+
 2-state FSM (IDLE → WAITING). Valid/ready handshake with program memory. One fetcher per core, shared across all threads (SIMD fetch from thread 0's PC).
 
 ### 6. LSU — Load Store Unit (`lsu.sv`)
+![LSU Diagram](assets/Images-Components/LSU-page-00001.jpg)
+
 2-state FSM (IDLE → WAITING). Handles LDR and STR with valid/ready handshake. `read_write_switch` signals memory read vs write direction. `is_read` explicitly cleared in the write path to prevent stale state. One LSU per thread.
 
 ### 7. Memory Controller (`mem_controller.sv`)
+![Memory Controller Diagram](assets/Images-Components/Memory%20Controller-page-00001.jpg)
+
 Parameterized pass-through (NUM_CORES × THREADS_PER_CORE channels). Direct 1:1 mapping between threads and memory channels. Pure combinational. Round-robin arbitration planned.
 
 ### 8. Scheduler (`scheduler.sv`)
+![Scheduler Diagram](assets/Images-Components/Scheduler-page-00001.jpg)
+
 7-state FSM controlling the core pipeline. Broadcasts enable signals to all threads simultaneously (SIMD). Waits for all LSUs via AND-reduction of `lsu_done`. Outputs `pc_en` on the UPDATE→FETCH transition to advance the program counter.
 
 ```
@@ -153,15 +169,23 @@ UPDATE  (110) — Write back results, assert pc_en, check RET
 ```
 
 ### 9. Core (`core.sv`)
+![Core Diagram](assets/Images-Components/Core-page-00001.jpg)
+
 Instantiates 1 Scheduler, 1 Fetcher, 1 Decoder, and THREADS_PER_CORE instances each of ALU, LSU, PC, Register File. Write-back mux selects: LSU read data for LDR, zero-extended immediate for CONST, ALU result otherwise. STR address computed as `Rs + sign_extend(imm)`, and STR data reads via r_addr3 using Rd.
 
 ### 10. Dispatcher (`dispatcher.sv`)
+![Dispatcher Diagram](assets/Images-Components/Dispatcher-page-00001.jpg)
+
 Assigns thread blocks to available cores. One block assigned per core per cycle. Tracks active blocks with a signed delta accumulator using blocking assignments (required to prevent NBA race conditions in always_ff). Asserts `kernel_done` when all blocks processed. Uses packed 2D `blockIdx_out[NUM_CORES-1:0][31:0]` for Icarus compatibility.
 
 ### 11. DCR — Device Control Register (`dcr.sv`)
+![DCR Diagram](assets/Images-Components/DCR-page-00001.jpg)
+
 Host-facing configuration interface. Address 0x00: `num_blocks`. Address 0x01: `block_dim`. Address 0x10: `start` pulse (single cycle).
 
 ### 12. Top-Level GPU (`top_level_gpu.sv`)
+![GPU Diagram](assets/Images-Components/GPU-page-00001.jpg)
+
 Wires DCR → Dispatcher → Cores → Memory. Parameterized: change NUM_CORES and THREADS_PER_CORE to scale. Uses intermediate wires in generate loop for Icarus VPI unpacked array compatibility.
 
 ---
