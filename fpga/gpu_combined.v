@@ -91,7 +91,7 @@ endmodule
 			;
 		case (r_addr1)
 			5'd0: r_data1 = 32'b00000000000000000000000000000000;
-			5'd29: r_data1 = threadIdx;
+			5'd29: r_data1 = (blockDim == 32'd1) ? blockIdx : threadIdx; // single-thread: r29=blockIdx
 			5'd30: r_data1 = blockIdx;
 			5'd31: r_data1 = blockDim;
 			default: r_data1 = reg_file[r_addr1];
@@ -102,7 +102,7 @@ endmodule
 			;
 		case (r_addr2)
 			5'd0: r_data2 = 32'b00000000000000000000000000000000;
-			5'd29: r_data2 = threadIdx;
+			5'd29: r_data2 = (blockDim == 32'd1) ? blockIdx : threadIdx; // single-thread: r29=blockIdx
 			5'd30: r_data2 = blockIdx;
 			5'd31: r_data2 = blockDim;
 			default: r_data2 = reg_file[r_addr2];
@@ -113,7 +113,7 @@ endmodule
 			;
 		case (r_addr3)
 			5'd0: r_data3 = 32'b00000000000000000000000000000000;
-			5'd29: r_data3 = threadIdx;
+			5'd29: r_data3 = (blockDim == 32'd1) ? blockIdx : threadIdx; // single-thread: r29=blockIdx
 			5'd30: r_data3 = blockIdx;
 			5'd31: r_data3 = blockDim;
 			default: r_data3 = reg_file[r_addr3];
