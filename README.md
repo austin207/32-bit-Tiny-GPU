@@ -20,40 +20,7 @@ The GPU trains a matrix multiplication kernel over 20 epochs in Q8 fixed-point a
 
 ## Architecture Overview
 
-```
-Host CPU
-    │
-    ▼
-┌──────────────────────────────────────────────────────┐
-│                     GPU (Top Level)                  │
-│                                                      │
-│  ┌──────┐    ┌────────────┐    ┌─────────────────┐   │
-│  │ DCR  │───►│ Dispatcher │───►│   Core (×N)     │   │
-│  └──────┘    └────────────┘    │                 │   │
-│                                │  ┌───────────┐  │   │
-│                                │  │ Scheduler │  │   │
-│                                │  ├───────────┤  │   │
-│                                │  │  Fetcher  │  │   │
-│                                │  ├───────────┤  │   │
-│                                │  │  Decoder  │  │   │
-│                                │  ├───────────┤  │   │
-│                                │  │ ALU (×T)  │  │   │
-│                                │  ├───────────┤  │   │
-│                                │  │ LSU (×T)  │  │   │
-│                                │  ├───────────┤  │   │
-│                                │  │  PC (×T)  │  │   │
-│                                │  ├───────────┤  │   │
-│                                │  │RegFile(×T)│  │   │
-│                                │  └───────────┘  │   │
-│                                └─────────────────┘   │
-│                                         │            │
-│                              ┌───────────────────┐   │
-│                              │ Memory Controller │   │
-│                              └───────────────────┘   │
-└──────────────────────────────────────┬───────────────┘
-                                       │
-                              Program + Data Memory
-```
+![ISA Diagram](assets/Architecture-images/gpu_architecture.png)
 
 **N** = NUM_CORES (default: 4)
 **T** = THREADS_PER_CORE (default: 4)
@@ -65,12 +32,7 @@ Host CPU
 
 32-bit fixed-width instructions. 6-bit opcode field. Four instruction formats:
 
-```
-R-type: [31:26] opcode | [25:21] Rd | [20:16] Rs1 | [15:11] Rs2 | [10:6] Rs3 | [5:0] unused
-I-type: [31:26] opcode | [25:21] Rd | [20:16] Rs  | [15:0] imm[15:0]
-B-type: [31:26] opcode | [25:23] nzp | [22:0] PC offset
-N-type: [31:26] opcode | [25:0] unused
-```
+![ISA Diagram](assets/Architecture-images/instruction_encoding.png)
 
 ### Opcode Table
 
@@ -210,6 +172,8 @@ gpu #(
 ---
 
 ## AXEL Assembler
+
+![AXEL Architecture Diagram](assets/Architecture-images/software_layer_architecture.png)
 
 AXEL is a C library that emits `.hex` kernel files for the GPU. It provides two layers: `gpu_asm` (low-level `emit_*` functions) and `axel` (higher-level kernel API with register name aliases).
 
