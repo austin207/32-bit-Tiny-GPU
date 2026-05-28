@@ -14,9 +14,12 @@ TEST_DIRS := \
 	Src/device_control_register \
 	Src/Top_level_GPU
 
-.PHONY: test clean
+.PHONY: test clean assembler infer
 
-test:
+assembler:
+	$(MAKE) -C assembler
+
+test: assembler
 	@set -e; \
 	for dir in $(TEST_DIRS); do \
 		echo "========================================"; \
@@ -25,7 +28,11 @@ test:
 		$(MAKE) -C $$dir; \
 	done
 
+infer: assembler
+	$(MAKE) -C Src/Top_level_GPU infer
+
 clean:
+	$(MAKE) -C assembler clean || true
 	@for dir in $(TEST_DIRS); do \
 		echo "Cleaning $$dir"; \
 		$(MAKE) -C $$dir clean || true; \
