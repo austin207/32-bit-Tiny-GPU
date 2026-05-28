@@ -49,10 +49,6 @@ logic [22:0] branch_offset;
 logic ret, write_back_en_dec, mem_read_en, mem_write_en, branch_en, nzp_en;
 
 // ── Per-thread arrays ────────────────────────────────────────────────────────
-// syn_keep=1: prevents Gowin from sweeping threads 1-3 as dead logic.
-// Threads 1-3 only drive their own register files and LSU channels —
-// without this attribute the synthesiser sees no path to a primary output
-// and removes them, corrupting all memory accesses for those threads.
 (* syn_keep=1 *) logic [31:0] alu_result    [THREADS_PER_CORE-1:0];
 (* syn_keep=1 *) logic [2:0]  nzp_result    [THREADS_PER_CORE-1:0];
                  logic [THREADS_PER_CORE-1:0] lsu_done;
@@ -63,11 +59,13 @@ logic ret, write_back_en_dec, mem_read_en, mem_write_en, branch_en, nzp_en;
 (* syn_keep=1 *) logic [31:0] mem_addr      [THREADS_PER_CORE-1:0];
 
 // Shared PC — single instance for all threads (SIMD).
-// All threads execute the same instruction at the same PC.
-// Branch decision uses nzp_result[0] as representative for the whole warp.
-// One shared PC eliminates 3 dead per-thread PC instances that trigger
-// NL0002 sweep warnings in Gowin.
 logic [31:0] pc_shared;
+
+// pc_block_rst: resets PC to 0 at the start of each new block.
+// Fires when scheduler is in IDLE (3'b000) and core_start pulses (IDLE→FETCH).
+// Ensures block N+1 fetches from instruction 0, not block N's RET address.
+logic pc_block_rst;
+assign pc_block_rst = (current_state == 3'b000) && core_start;
 
 // ── Scheduler ────────────────────────────────────────────────────────────────
 scheduler #(
@@ -124,7 +122,6 @@ decoder dec (
 );
 
 // ── Per-thread generate: ALU, LSU, Register File ─────────────────────────────
-// PC is NOT inside this loop — one shared instance is used instead.
 genvar i;
 (* syn_keep=1 *) logic [31:0] write_data [THREADS_PER_CORE-1:0];
 
@@ -184,11 +181,12 @@ generate
 endgenerate
 
 // ── Shared PC instance ───────────────────────────────────────────────────────
-// nzp_result[0] is thread 0's flag — representative for the whole warp
-// since all threads execute the same instruction in lockstep (SIMD).
+// block_rst resets PC to 0 when a new block is dispatched.
+// nzp_result[0] is thread 0's flag — representative for SIMD lockstep.
 pc pc_inst (
     .clk          (clk),
     .rst          (rst),
+    .block_rst    (pc_block_rst),
     .pc_en        (pc_en),
     .branch_en    (branch_en),
     .branch_offset(branch_offset),

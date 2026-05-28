@@ -1,6 +1,8 @@
-module pc (
+(* syn_dont_touch = 1 *) module pc (
     input logic clk,
     input logic rst,
+    input logic block_rst,    // resets PC to 0 at start of each new block
+                               // connect to: (scheduler_state==IDLE) && core_start
     input logic pc_en,
     input logic branch_en,
     input logic [22:0] branch_offset,
@@ -16,6 +18,12 @@ always_ff @(posedge clk or posedge rst) begin
     if (rst) begin
         pc_out  <= 32'b0;
         nzp_reg <= 3'b000;
+    end else if (block_rst) begin
+        // Reset PC to 0 when a new block is dispatched.
+        // Fires when scheduler is in IDLE and core_start pulses (IDLE→FETCH).
+        // Ensures block N+1 fetches from instruction 0, not block N's RET address.
+        pc_out  <= 32'b0;
+        nzp_reg <= 3'b000;
     end else begin
         if (nzp_en)
             nzp_reg <= nzp_flag;
@@ -27,5 +35,5 @@ always_ff @(posedge clk or posedge rst) begin
         end
     end
 end
-    
+
 endmodule

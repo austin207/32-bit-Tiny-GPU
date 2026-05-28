@@ -43,6 +43,7 @@
 	end
 	initial _sv2v_0 = 0;
 endmodule
+
 (* syn_dont_touch = 1 *) module registers (
 	clk,
 	rst,
@@ -75,8 +76,6 @@ endmodule
 	output reg [31:0] r_data2;
 	output reg [31:0] r_data3;
 	reg [31:0] reg_file [0:31];
-	wire [31:0] r29_value;
-	assign r29_value = (blockDim == 32'd1 ? blockIdx : threadIdx);
 	always @(posedge clk or posedge rst)
 		if (rst) begin : sv2v_autoblock_1
 			reg signed [31:0] i;
@@ -92,7 +91,7 @@ endmodule
 			;
 		case (r_addr1)
 			5'd0: r_data1 = 32'b00000000000000000000000000000000;
-			5'd29: r_data1 = r29_value;
+			5'd29: r_data1 = (blockDim == 32'd1) ? blockIdx : threadIdx; // single-thread: r29=blockIdx
 			5'd30: r_data1 = blockIdx;
 			5'd31: r_data1 = blockDim;
 			default: r_data1 = reg_file[r_addr1];
@@ -103,7 +102,7 @@ endmodule
 			;
 		case (r_addr2)
 			5'd0: r_data2 = 32'b00000000000000000000000000000000;
-			5'd29: r_data2 = r29_value;
+			5'd29: r_data2 = (blockDim == 32'd1) ? blockIdx : threadIdx; // single-thread: r29=blockIdx
 			5'd30: r_data2 = blockIdx;
 			5'd31: r_data2 = blockDim;
 			default: r_data2 = reg_file[r_addr2];
@@ -114,7 +113,7 @@ endmodule
 			;
 		case (r_addr3)
 			5'd0: r_data3 = 32'b00000000000000000000000000000000;
-			5'd29: r_data3 = r29_value;
+			5'd29: r_data3 = (blockDim == 32'd1) ? blockIdx : threadIdx; // single-thread: r29=blockIdx
 			5'd30: r_data3 = blockIdx;
 			5'd31: r_data3 = blockDim;
 			default: r_data3 = reg_file[r_addr3];
@@ -122,9 +121,11 @@ endmodule
 	end
 	initial _sv2v_0 = 0;
 endmodule
+
 (* syn_dont_touch = 1 *) module pc (
 	clk,
 	rst,
+	block_rst,
 	pc_en,
 	branch_en,
 	branch_offset,
@@ -135,6 +136,7 @@ endmodule
 );
 	input wire clk;
 	input wire rst;
+	input wire block_rst; // resets pc_out to 0 at start of each new block
 	input wire pc_en;
 	input wire branch_en;
 	input wire [22:0] branch_offset;
@@ -145,7 +147,12 @@ endmodule
 	reg [2:0] nzp_reg;
 	always @(posedge clk or posedge rst)
 		if (rst) begin
-			pc_out <= 32'b00000000000000000000000000000000;
+			pc_out <= 32'b0;
+			nzp_reg <= 3'b000;
+		end else if (block_rst) begin
+			// Reset PC to 0 at the start of each new block.
+			// Fires when scheduler transitions IDLE→FETCH on core_start.
+			pc_out  <= 32'b0;
 			nzp_reg <= 3'b000;
 		end
 		else begin
@@ -159,6 +166,7 @@ endmodule
 			end
 		end
 endmodule
+
 module decoder (
 	instruction,
 	opcode,
@@ -178,56 +186,57 @@ module decoder (
 );
 	reg _sv2v_0;
 	input wire [31:0] instruction;
-	output wire [5:0] opcode;
-	output wire [4:0] rd_addr;
-	output wire [4:0] rs1_addr;
-	output wire [4:0] rs2_addr;
-	output wire [4:0] rs3_addr;
-	output wire [15:0] imm;
-	output wire [2:0] nzp_mask;
-	output wire [22:0] branch_offset;
+	output reg [5:0] opcode;
+	output reg [4:0] rd_addr;
+	output reg [4:0] rs1_addr;
+	output reg [4:0] rs2_addr;
+	output reg [4:0] rs3_addr;
+	output reg [15:0] imm;
+	output reg [2:0] nzp_mask;
+	output reg [22:0] branch_offset;
 	output reg ret;
 	output reg write_back_en;
 	output reg mem_read_en;
 	output reg mem_write_en;
 	output reg branch_en;
 	output reg nzp_en;
-	assign opcode = instruction[31:26];
-	assign rd_addr = instruction[25:21];
-	assign rs1_addr = instruction[20:16];
-	assign rs2_addr = instruction[15:11];
-	assign rs3_addr = instruction[10:6];
-	assign imm = instruction[15:0];
-	assign nzp_mask = instruction[25:23];
-	assign branch_offset = instruction[22:0];
 	always @(*) begin
 		if (_sv2v_0)
 			;
-		ret = 1'b0;
-		write_back_en = 1'b0;
-		mem_read_en = 1'b0;
-		mem_write_en = 1'b0;
-		branch_en = 1'b0;
-		nzp_en = 1'b0;
+		opcode = instruction[31:26];
+		rd_addr = instruction[25:21];
+		rs1_addr = instruction[20:16];
+		rs2_addr = instruction[15:11];
+		rs3_addr = instruction[10:6];
+		imm = instruction[15:0];
+		nzp_mask = instruction[25:23];
+		branch_offset = instruction[22:0];
+		ret = 0;
+		write_back_en = 0;
+		mem_read_en = 0;
+		mem_write_en = 0;
+		branch_en = 0;
+		nzp_en = 0;
 		case (opcode)
 			6'h00:
 				;
-			6'h01, 6'h02, 6'h03, 6'h04, 6'h05, 6'h06, 6'h07, 6'h08, 6'h09, 6'h0a, 6'h0b, 6'h0c, 6'h13, 6'h14: write_back_en = 1'b1;
-			6'h0d: nzp_en = 1'b1;
-			6'h0e: branch_en = 1'b1;
+			6'h01, 6'h02, 6'h03, 6'h04, 6'h05, 6'h06, 6'h07, 6'h08, 6'h09, 6'h0a, 6'h0b, 6'h0c, 6'h13, 6'h14: write_back_en = 1;
+			6'h0d: nzp_en = 1;
+			6'h0e: branch_en = 1;
 			6'h0f: begin
-				mem_read_en = 1'b1;
-				write_back_en = 1'b1;
+				mem_read_en = 1;
+				write_back_en = 1;
 			end
-			6'h10: mem_write_en = 1'b1;
-			6'h11: write_back_en = 1'b1;
-			6'h12: ret = 1'b1;
+			6'h10: mem_write_en = 1;
+			6'h11: write_back_en = 1;
+			6'h12: ret = 1;
 			default:
 				;
 		endcase
 	end
 	initial _sv2v_0 = 0;
 endmodule
+
 module fetcher (
 	clk,
 	rst,
@@ -281,6 +290,7 @@ module fetcher (
 			endcase
 		end
 endmodule
+
 module lsu (
 	clk,
 	rst,
@@ -363,6 +373,7 @@ module lsu (
 			endcase
 		end
 endmodule
+
 module memory_controller (
 	req_avail,
 	req_addr,
@@ -377,6 +388,7 @@ module memory_controller (
 	mem_resp_valid,
 	mem_resp_data
 );
+	reg _sv2v_0;
 	parameter NUM_CORES = 1;
 	parameter THREADS_PER_CORE = 4;
 	parameter TOTAL_THREADS = NUM_CORES * THREADS_PER_CORE;
@@ -384,27 +396,33 @@ module memory_controller (
 	input wire [(TOTAL_THREADS * 32) - 1:0] req_addr;
 	input wire [TOTAL_THREADS - 1:0] read_write_switch;
 	input wire [(TOTAL_THREADS * 32) - 1:0] req_data;
-	output wire [TOTAL_THREADS - 1:0] resp_valid;
-	output wire [(TOTAL_THREADS * 32) - 1:0] resp_data;
-	output wire [TOTAL_THREADS - 1:0] mem_req_valid;
-	output wire [(TOTAL_THREADS * 32) - 1:0] mem_req_addr;
-	output wire [TOTAL_THREADS - 1:0] mem_req_rw;
-	output wire [(TOTAL_THREADS * 32) - 1:0] mem_req_data;
+	output reg [TOTAL_THREADS - 1:0] resp_valid;
+	output reg [(TOTAL_THREADS * 32) - 1:0] resp_data;
+	output reg [TOTAL_THREADS - 1:0] mem_req_valid;
+	output reg [(TOTAL_THREADS * 32) - 1:0] mem_req_addr;
+	output reg [TOTAL_THREADS - 1:0] mem_req_rw;
+	output reg [(TOTAL_THREADS * 32) - 1:0] mem_req_data;
 	input wire [TOTAL_THREADS - 1:0] mem_resp_valid;
 	input wire [(TOTAL_THREADS * 32) - 1:0] mem_resp_data;
-	genvar _gv_i_1;
-	generate
-		for (_gv_i_1 = 0; _gv_i_1 < TOTAL_THREADS; _gv_i_1 = _gv_i_1 + 1) begin : request_response_forwarding
-			localparam i = _gv_i_1;
-			assign mem_req_valid[i] = req_avail[i];
-			assign mem_req_addr[i * 32+:32] = req_addr[i * 32+:32];
-			assign mem_req_rw[i] = read_write_switch[i];
-			assign mem_req_data[i * 32+:32] = req_data[i * 32+:32];
-			assign resp_valid[i] = mem_resp_valid[i];
-			assign resp_data[i * 32+:32] = mem_resp_data[i * 32+:32];
+	always @(*) begin
+		if (_sv2v_0)
+			;
+		begin : sv2v_autoblock_1
+			reg signed [31:0] i;
+			for (i = 0; i < TOTAL_THREADS; i = i + 1)
+				begin
+					mem_req_valid[i] = req_avail[i];
+					mem_req_addr[i * 32+:32] = req_addr[i * 32+:32];
+					mem_req_rw[i] = read_write_switch[i];
+					mem_req_data[i * 32+:32] = req_data[i * 32+:32];
+					resp_valid[i] = mem_resp_valid[i];
+					resp_data[i * 32+:32] = mem_resp_data[i * 32+:32];
+				end
 		end
-	endgenerate
+	end
+	initial _sv2v_0 = 0;
 endmodule
+
 module scheduler (
 	clk,
 	rst,
@@ -506,6 +524,11 @@ module scheduler (
 			endcase
 		end
 endmodule
+
+// ── CORE MODULE ───────────────────────────────────────────────────────────────
+// syn_keep=1 is placed on internal wire declarations here (in the module body,
+// after the port list) — the ONLY correct location in Verilog-2001.
+// This prevents Gowin from sweeping thread_gen[1..3] ALU/PC/regfile as dead logic.
 module core (
 	clk,
 	rst,
@@ -513,7 +536,6 @@ module core (
 	blockIdx,
 	blockDim,
 	block_done,
-	thread_keep_alive,
 	prog_mem_req_valid,
 	prog_mem_req_addr,
 	prog_mem_resp_valid,
@@ -523,7 +545,8 @@ module core (
 	data_mem_req_rw,
 	data_mem_req_data,
 	data_mem_resp_valid,
-	data_mem_resp_data
+	data_mem_resp_data,
+	thread_keep_alive
 );
 	parameter THREADS_PER_CORE = 4;
 	input wire clk;
@@ -543,6 +566,8 @@ module core (
 	output wire [(THREADS_PER_CORE * 32) - 1:0] data_mem_req_data;
 	input wire [THREADS_PER_CORE - 1:0] data_mem_resp_valid;
 	input wire [(THREADS_PER_CORE * 32) - 1:0] data_mem_resp_data;
+
+	// Control signals (shared across all threads — SIMD)
 	wire fetcher_en;
 	wire lsu_en;
 	wire execute_en;
@@ -567,15 +592,25 @@ module core (
 	wire mem_write_en;
 	wire branch_en;
 	wire nzp_en;
-	(* syn_keep = 1 *) wire [31:0] alu_result [THREADS_PER_CORE - 1:0];
-	(* syn_keep = 1 *) wire [2:0] nzp_result [THREADS_PER_CORE - 1:0];
-	wire [THREADS_PER_CORE - 1:0] lsu_done;
-	(* syn_keep = 1 *) wire [31:0] lsu_read_data [THREADS_PER_CORE - 1:0];
-	(* syn_keep = 1 *) wire [31:0] reg_data1 [THREADS_PER_CORE - 1:0];
-	(* syn_keep = 1 *) wire [31:0] reg_data2 [THREADS_PER_CORE - 1:0];
-	(* syn_keep = 1 *) wire [31:0] reg_data3 [THREADS_PER_CORE - 1:0];
-	(* syn_keep = 1 *) wire [31:0] mem_addr [THREADS_PER_CORE - 1:0];
-	wire [31:0] pc_shared;
+
+	// Per-thread arrays — syn_keep=1 prevents optimizer from sweeping
+	// threads 1-3 whose outputs only feed back into the register file.
+	// Without this, Gowin sees them as dead logic and removes them,
+	// corrupting memory addresses for threads 1-3.
+	(* syn_keep=1 *) wire [31:0] alu_result [THREADS_PER_CORE - 1:0];
+	(* syn_keep=1 *) wire [2:0]  nzp_result [THREADS_PER_CORE - 1:0];
+	                 wire [THREADS_PER_CORE - 1:0] lsu_done;
+	(* syn_keep=1 *) wire [31:0] lsu_read_data [THREADS_PER_CORE - 1:0];
+	(* syn_keep=1 *) wire [31:0] reg_data1 [THREADS_PER_CORE - 1:0];
+	(* syn_keep=1 *) wire [31:0] reg_data2 [THREADS_PER_CORE - 1:0];
+	(* syn_keep=1 *) wire [31:0] reg_data3 [THREADS_PER_CORE - 1:0];
+	wire [31:0] pc_shared; // single shared PC (SIMD: all threads same instruction)
+	// pc_block_rst: resets PC to 0 at the start of each new block.
+	// Fires when scheduler is in IDLE(3'b000) and core_start pulses.
+	// Ensures block N+1 fetches from instruction 0, not the RET address of block N.
+	wire pc_block_rst = (current_state == 3'b000) && core_start;
+	(* syn_keep=1 *) wire [31:0] mem_addr  [THREADS_PER_CORE - 1:0];
+
 	scheduler #(.THREADS_PER_CORE(THREADS_PER_CORE)) shed(
 		.clk(clk),
 		.rst(rst),
@@ -593,6 +628,7 @@ module core (
 		.block_done(block_done),
 		.pc_en(pc_en)
 	);
+
 	fetcher fetch(
 		.clk(clk),
 		.rst(rst),
@@ -605,6 +641,7 @@ module core (
 		.resp_valid(prog_mem_resp_valid),
 		.resp_data(prog_mem_resp_data)
 	);
+
 	decoder dec(
 		.instruction(instruction),
 		.opcode(opcode),
@@ -622,13 +659,17 @@ module core (
 		.branch_en(branch_en),
 		.nzp_en(nzp_en)
 	);
-	genvar _gv_i_2;
-	(* syn_keep = 1 *) wire [31:0] write_data [THREADS_PER_CORE - 1:0];
+
+	genvar _gv_i_1;
+	// write_data also needs syn_keep — it's the mux output feeding reg_file
+	(* syn_keep=1 *) wire [31:0] write_data [THREADS_PER_CORE - 1:0];
+
 	generate
-		for (_gv_i_2 = 0; _gv_i_2 < THREADS_PER_CORE; _gv_i_2 = _gv_i_2 + 1) begin : thread_gen
-			localparam i = _gv_i_2;
-			assign mem_addr[i] = reg_data1[i] + {{16 {imm[15]}}, imm};
+		for (_gv_i_1 = 0; _gv_i_1 < THREADS_PER_CORE; _gv_i_1 = _gv_i_1 + 1) begin : thread_gen
+			localparam i = _gv_i_1;
+			assign mem_addr[i]   = reg_data1[i] + {{16 {imm[15]}}, imm};
 			assign write_data[i] = (mem_read_en ? lsu_read_data[i] : (opcode == 6'h11 ? {16'b0000000000000000, imm} : alu_result[i]));
+
 			alu alu_inst(
 				.operand1(reg_data1[i]),
 				.operand2(reg_data2[i]),
@@ -637,6 +678,7 @@ module core (
 				.result(alu_result[i]),
 				.nzp_flag(nzp_result[i])
 			);
+
 			lsu lsu_inst(
 				.clk(clk),
 				.rst(rst),
@@ -654,6 +696,8 @@ module core (
 				.done(lsu_done[i]),
 				.mem_read_data(lsu_read_data[i])
 			);
+
+
 			registers reg_file(
 				.clk(clk),
 				.rst(rst),
@@ -672,28 +716,42 @@ module core (
 			);
 		end
 	endgenerate
+
+	// ── Shared PC (single instance for all threads) ─────────────────────────
+	// SIMD architecture: all threads execute the same instruction at the same
+	// program counter. Branch decision uses nzp_result[0] (thread 0 is
+	// representative since all threads run in lockstep with the same opcode).
+	// Moving to one shared PC eliminates the 3 dead per-thread PC instances
+	// that previously caused NL0002 sweep warnings.
 	pc pc_inst(
 		.clk(clk),
 		.rst(rst),
+		.block_rst(pc_block_rst),
 		.pc_en(pc_en),
 		.branch_en(branch_en),
 		.branch_offset(branch_offset),
 		.nzp_en(nzp_en),
-		.nzp_flag(nzp_result[0]),
+		.nzp_flag(nzp_result[0]),   // thread 0 representative for SIMD branch
 		.nzp_mask(nzp_mask),
 		.pc_out(pc_shared)
 	);
-	genvar _gv_k_1;
+
+	// ── Thread-lane observability guard (parameterized) ─────────────────────
+	// XOR of all thread write_data — forces each thread's ALU and register
+	// file into the backward-analysis chain from the primary LED output.
+	// Uses a generate-based reduction so it works for any THREADS_PER_CORE.
+	genvar _gv_k;
 	wire [31:0] _keep_xor [THREADS_PER_CORE:0];
-	assign _keep_xor[0] = 32'b00000000000000000000000000000000;
+	assign _keep_xor[0] = 32'b0;
 	generate
-		for (_gv_k_1 = 0; _gv_k_1 < THREADS_PER_CORE; _gv_k_1 = _gv_k_1 + 1) begin : keep_xor_gen
-			localparam k = _gv_k_1;
-			assign _keep_xor[k + 1] = _keep_xor[k] ^ write_data[k];
+		for (_gv_k = 0; _gv_k < THREADS_PER_CORE; _gv_k = _gv_k + 1) begin : keep_xor_gen
+			assign _keep_xor[_gv_k + 1] = _keep_xor[_gv_k] ^ write_data[_gv_k];
 		end
 	endgenerate
 	assign thread_keep_alive = _keep_xor[THREADS_PER_CORE];
+
 endmodule
+
 module dispatcher (
 	clk,
 	rst,
@@ -766,6 +824,7 @@ module dispatcher (
 				kernel_done <= 1;
 		end
 endmodule
+
 module dcr (
 	clk,
 	rst,
@@ -800,6 +859,8 @@ module dcr (
 				endcase
 		end
 endmodule
+
+// $dumpfile/$dumpvars removed — simulation-only, breaks synthesis
 module gpu (
 	clk,
 	rst,
@@ -807,7 +868,6 @@ module gpu (
 	dcr_addr,
 	dcr_data,
 	kernel_done,
-	thread_keep_alive,
 	prog_mem_req_valid,
 	prog_mem_req_addr,
 	prog_mem_resp_valid,
@@ -817,7 +877,8 @@ module gpu (
 	data_mem_req_rw,
 	data_mem_req_data,
 	data_mem_resp_valid,
-	data_mem_resp_data
+	data_mem_resp_data,
+	thread_keep_alive
 );
 	parameter NUM_CORES = 4;
 	parameter THREADS_PER_CORE = 4;
@@ -845,7 +906,9 @@ module gpu (
 	wire [NUM_CORES - 1:0] core_start;
 	wire [(NUM_CORES * 32) - 1:0] blockIdx_out;
 	wire [NUM_CORES - 1:0] block_done;
+	// Per-core thread_keep_alive signals; aggregated to gpu output.
 	wire [31:0] core_keep_alive [NUM_CORES - 1:0];
+	assign thread_keep_alive = core_keep_alive[0]; // core 0 (FPGA: NUM_CORES=1)
 	dcr dcr_inst(
 		.clk(clk),
 		.rst(rst),
@@ -867,10 +930,10 @@ module gpu (
 		.blockIdx_out(blockIdx_out),
 		.kernel_done(kernel_done)
 	);
-	genvar _gv_i_3;
+	genvar _gv_i_2;
 	generate
-		for (_gv_i_3 = 0; _gv_i_3 < NUM_CORES; _gv_i_3 = _gv_i_3 + 1) begin : core_gen
-			localparam i = _gv_i_3;
+		for (_gv_i_2 = 0; _gv_i_2 < NUM_CORES; _gv_i_2 = _gv_i_2 + 1) begin : core_gen
+			localparam i = _gv_i_2;
 			wire [THREADS_PER_CORE - 1:0] core_data_req_valid;
 			wire [(THREADS_PER_CORE * 32) - 1:0] core_data_req_addr;
 			wire [THREADS_PER_CORE - 1:0] core_data_req_rw;
@@ -898,7 +961,6 @@ module gpu (
 				.blockIdx(blockIdx_out[i * 32+:32]),
 				.blockDim(blockDim),
 				.block_done(block_done[i]),
-				.thread_keep_alive(core_keep_alive[i]),
 				.prog_mem_req_valid(prog_mem_req_valid[i]),
 				.prog_mem_req_addr(prog_mem_req_addr_wire),
 				.prog_mem_resp_valid(prog_mem_resp_valid[i]),
@@ -908,18 +970,9 @@ module gpu (
 				.data_mem_req_rw(core_data_req_rw),
 				.data_mem_req_data(core_data_req_data),
 				.data_mem_resp_valid(core_data_resp_valid),
-				.data_mem_resp_data(core_data_resp_data)
+				.data_mem_resp_data(core_data_resp_data),
+				.thread_keep_alive(core_keep_alive[i])
 			);
 		end
 	endgenerate
-	genvar _gv_m_1;
-	wire [31:0] _top_keep_xor [NUM_CORES:0];
-	assign _top_keep_xor[0] = 32'b00000000000000000000000000000000;
-	generate
-		for (_gv_m_1 = 0; _gv_m_1 < NUM_CORES; _gv_m_1 = _gv_m_1 + 1) begin : top_keep_xor_gen
-			localparam m = _gv_m_1;
-			assign _top_keep_xor[m + 1] = _top_keep_xor[m] ^ core_keep_alive[m];
-		end
-	endgenerate
-	assign thread_keep_alive = _top_keep_xor[NUM_CORES];
 endmodule

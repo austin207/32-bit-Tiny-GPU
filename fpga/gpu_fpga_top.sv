@@ -142,11 +142,20 @@ always @(posedge clk_slow or posedge rst_sync) begin
                 dcr_we_r <= 1; dcr_addr_r <= 2'b01; dcr_data_r <= 32'd1;
                 dstate <= 3;
             end
-            3'd3: begin // start pulse
-                dcr_we_r <= 1; dcr_addr_r <= 2'b10; dcr_data_r <= 32'd0;
-                dstate <= 4;
+            3'd3: begin
+                // Keep dispatch_en=1 every cycle until kernel_done.
+                // With NUM_CORES=1 and num_blocks=4, the dispatcher needs
+                // dispatch_en asserted when each block completes so it can
+                // assign the next block. A single pulse only dispatches block 0.
+                dcr_we_r   <= 1'b1;
+                dcr_addr_r <= 2'b10;
+                dcr_data_r <= 32'd0;
+                if (kernel_done) begin
+                    dcr_we_r <= 1'b0; // stop after all blocks complete
+                    dstate   <= 3'd4;
+                end
             end
-            3'd4: ;  // GPU running
+            3'd4: ;  // GPU done, kernel_done latched
         endcase
     end
 end
@@ -388,7 +397,6 @@ localparam MS_WAIT = 2'd2;
 localparam MS_DONE = 2'd3;
 
 reg [1:0] ms_state;
-reg [25:0] repeat_delay;
 
 always @(posedge clk or posedge rst_sync) begin
     if (rst_sync) begin
@@ -396,7 +404,6 @@ always @(posedge clk or posedge rst_sync) begin
         msg_pos   <= 6'd0;
         uart_send <= 1'b0;
         uart_byte <= 8'h00;
-        repeat_delay  <= 26'd0;
     end else begin
         uart_send <= 1'b0;
         case (ms_state)
@@ -422,15 +429,7 @@ always @(posedge clk or posedge rst_sync) begin
                     end
                 end
             end
-            MS_DONE: begin
-                if (repeat_delay == 26'd27_000_000) begin
-                    repeat_delay <= 26'd0;
-                    msg_pos      <= 6'd0;
-                    ms_state     <= MS_SEND;
-                end else begin
-                    repeat_delay <= repeat_delay + 1;
-                end
-            end
+            MS_DONE: ; // stay here — output sent
         endcase
     end
 end
