@@ -49,15 +49,25 @@ logic [22:0] branch_offset;
 logic ret, write_back_en_dec, mem_read_en, mem_write_en, branch_en, nzp_en;
 
 // ── Per-thread arrays ────────────────────────────────────────────────────────
-logic [31:0] alu_result    [THREADS_PER_CORE-1:0];
-logic [2:0]  nzp_result    [THREADS_PER_CORE-1:0];
-logic [THREADS_PER_CORE-1:0] lsu_done;
-logic [31:0] lsu_read_data [THREADS_PER_CORE-1:0];
-logic [31:0] reg_data1     [THREADS_PER_CORE-1:0];
-logic [31:0] reg_data2     [THREADS_PER_CORE-1:0];
-logic [31:0] reg_data3     [THREADS_PER_CORE-1:0];
-logic [31:0] pc_out        [THREADS_PER_CORE-1:0];
-logic [31:0] mem_addr      [THREADS_PER_CORE-1:0];
+// syn_keep=1: prevents Gowin from sweeping threads 1-3 as dead logic.
+// Threads 1-3 only drive their own register files and LSU channels —
+// without this attribute the synthesiser sees no path to a primary output
+// and removes them, corrupting all memory accesses for those threads.
+(* syn_keep=1 *) logic [31:0] alu_result    [THREADS_PER_CORE-1:0];
+(* syn_keep=1 *) logic [2:0]  nzp_result    [THREADS_PER_CORE-1:0];
+                 logic [THREADS_PER_CORE-1:0] lsu_done;
+(* syn_keep=1 *) logic [31:0] lsu_read_data [THREADS_PER_CORE-1:0];
+(* syn_keep=1 *) logic [31:0] reg_data1     [THREADS_PER_CORE-1:0];
+(* syn_keep=1 *) logic [31:0] reg_data2     [THREADS_PER_CORE-1:0];
+(* syn_keep=1 *) logic [31:0] reg_data3     [THREADS_PER_CORE-1:0];
+(* syn_keep=1 *) logic [31:0] mem_addr      [THREADS_PER_CORE-1:0];
+
+// Shared PC — single instance for all threads (SIMD).
+// All threads execute the same instruction at the same PC.
+// Branch decision uses nzp_result[0] as representative for the whole warp.
+// One shared PC eliminates 3 dead per-thread PC instances that trigger
+// NL0002 sweep warnings in Gowin.
+logic [31:0] pc_shared;
 
 // ── Scheduler ────────────────────────────────────────────────────────────────
 scheduler #(
@@ -80,12 +90,12 @@ scheduler #(
     .pc_en        (pc_en)
 );
 
-// ── Fetcher ──────────────────────────────────────────────────────────────────
+// ── Fetcher — uses shared PC ─────────────────────────────────────────────────
 fetcher fetch (
     .clk         (clk),
     .rst         (rst),
     .core_en     (fetcher_en),
-    .pc_value    (pc_out[0]),
+    .pc_value    (pc_shared),
     .instruction (instruction),
     .done        (done),
     .req_valid   (prog_mem_req_valid),
@@ -113,9 +123,10 @@ decoder dec (
     .nzp_en       (nzp_en)
 );
 
-// ── Per-thread generate: ALU, LSU, PC, Register File ────────────────────────
+// ── Per-thread generate: ALU, LSU, Register File ─────────────────────────────
+// PC is NOT inside this loop — one shared instance is used instead.
 genvar i;
-logic [31:0] write_data [THREADS_PER_CORE-1:0];
+(* syn_keep=1 *) logic [31:0] write_data [THREADS_PER_CORE-1:0];
 
 generate
     for (i = 0; i < THREADS_PER_CORE; i++) begin : thread_gen
@@ -153,18 +164,6 @@ generate
             .mem_read_data    (lsu_read_data[i])
         );
 
-        pc pc_inst (
-            .clk          (clk),
-            .rst          (rst),
-            .pc_en        (pc_en),
-            .branch_en    (branch_en),
-            .branch_offset(branch_offset),
-            .nzp_en       (nzp_en),
-            .nzp_flag     (nzp_result[i]),
-            .nzp_mask     (nzp_mask),
-            .pc_out       (pc_out[i])
-        );
-
         registers reg_file (
             .clk      (clk),
             .rst      (rst),
@@ -184,10 +183,22 @@ generate
     end
 endgenerate
 
+// ── Shared PC instance ───────────────────────────────────────────────────────
+// nzp_result[0] is thread 0's flag — representative for the whole warp
+// since all threads execute the same instruction in lockstep (SIMD).
+pc pc_inst (
+    .clk          (clk),
+    .rst          (rst),
+    .pc_en        (pc_en),
+    .branch_en    (branch_en),
+    .branch_offset(branch_offset),
+    .nzp_en       (nzp_en),
+    .nzp_flag     (nzp_result[0]),
+    .nzp_mask     (nzp_mask),
+    .pc_out       (pc_shared)
+);
+
 // ── thread_keep_alive: XOR reduction across all thread write_data ────────────
-// Parameterized using a generate chain so it scales with THREADS_PER_CORE.
-// Result is driven to the top-level output, tying all thread compute paths
-// into the synthesis cone and preventing dead-logic sweep on FPGA.
 genvar k;
 logic [31:0] _keep_xor [THREADS_PER_CORE:0];
 assign _keep_xor[0] = 32'b0;

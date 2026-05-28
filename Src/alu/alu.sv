@@ -1,4 +1,4 @@
-module alu (
+(* syn_dont_touch = 1 *) module alu (
     input logic [31:0] operand1,
     input logic [31:0] operand2,
     input logic [31:0] operand3, // For operations with 3 operands like FMA

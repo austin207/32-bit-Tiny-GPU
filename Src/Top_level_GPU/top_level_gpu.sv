@@ -29,15 +29,6 @@ module gpu #(
     input  logic [31:0]                data_mem_resp_data [TOTAL_THREADS-1:0]
 );
 
-// VCD dump — simulation only; guarded so synthesis tools don't see it.
-// GTKWave: run make in Src/Top_level_GPU then open gpu.vcd
-`ifndef SYNTHESIS
-initial begin
-    $dumpfile("gpu.vcd");
-    $dumpvars(0, gpu);
-end
-`endif
-
 // ── DCR / Dispatcher wires ───────────────────────────────────────────────────
 logic [31:0] num_blocks;
 logic [31:0] blockDim;
