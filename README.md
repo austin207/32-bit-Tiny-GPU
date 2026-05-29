@@ -63,6 +63,8 @@ The GPU trains a matrix multiplication kernel over 20 epochs in Q8 fixed-point a
 
 IMUL and SAR were added to support Q8 fixed-point gradient computation. SHR fills with zeros, which corrupts the sign of negative gradients; SAR preserves it.
 
+**BRnzp branch offset encoding**: the 23-bit `branch_offset` field is added directly to the PC as an unsigned value. Forward branches use the offset as-is. Backward branches must encode the offset as a two's complement negative number in 23 bits (e.g. a jump of −3 is encoded as `0x7FFFFD`).
+
 ---
 
 ## Register File
@@ -84,72 +86,197 @@ IMUL and SAR were added to support Q8 fixed-point gradient computation. SHR fill
 ### 1. Register File (`register_file.sv`)
 ![Register File Diagram](assets/Images-Components/Register-page-00001.jpg)
 
-32×32-bit storage. Synchronous write with reset (clears R1–R28). Asynchronous triple read (supports R-type and FMA). R0 hardwired to zero; R29/R30/R31 hardware injected.
+32×32-bit register storage with one synchronous write port and three asynchronous read ports. The triple read allows FMA to read three source registers (Rs1, Rs2, Rs3) in a single cycle without stalling.
+
+On reset, only R1–R28 are cleared. R0 has no physical storage — all three read ports return hardwired zero when R0 is addressed, and writes to R0 are silently ignored by the write-enable guard (`w_addr >= 1 && w_addr <= 28`).
+
+R29, R30, and R31 are not stored in the register array either — they are driven directly from hardware-injected inputs:
+- **R29 (threadIdx)**: returns `threadIdx` input normally, but returns `blockIdx` when `blockDim == 1`. This is the FPGA single-thread patch: with one thread per block, `blockIdx` serves as the effective thread index so each sequential block computes the correct output row without changing the kernel.
+- **R30 (blockIdx)**: always returns the `blockIdx` input.
+- **R31 (blockDim)**: always returns the `blockDim` input.
+
+The `(* syn_dont_touch = 1 *)` attribute prevents synthesis tools from merging or eliminating register file instances.
 
 ### 2. ALU (`alu.sv`)
 ![ALU Diagram](assets/Images-Components/ALU-page-00001.jpg)
 
-Pure combinational logic. Implements 15 arithmetic and logic operations: ADD, SUB, MUL (unsigned), DIV, MOD, SHL, SHR (logical), AND, OR, XOR, NOT, FMA (3-operand multiply-accumulate), CMP, IMUL (signed multiply), and SAR (arithmetic right shift). Control instructions (NOP, BRnzp, LDR, STR, CONST, RET) are handled by other modules. Outputs 32-bit result and 3-bit NZP flag. NZP encoding: N=100 (negative), Z=010 (zero), P=001 (positive).
+Purely combinational execution unit — no clock, no state. Takes three 32-bit operands and a 6-bit `op_select` (the raw opcode), outputs a 32-bit `result` and a 3-bit `nzp_flag`. Both default to zero if the opcode is not an ALU operation, so the ALU is always active but safe to ignore on non-ALU instructions.
+
+Operations by category:
+
+- **Arithmetic**: ADD, SUB, MUL (unsigned 32-bit), DIV, MOD
+- **Shift**: SHL (logical left), SHR (logical right, zero-fills), SAR (arithmetic right, sign-extends — required for signed Q8 values)
+- **Logic**: AND, OR, XOR, NOT (unary, only uses operand1)
+- **Multiply-accumulate**: FMA — `result = (operand1 × operand2) + operand3`, single-cycle, no intermediate scaling. In Q8 usage, multiplying two Q8 values produces a Q16 result; the scale-down (SAR >>8) must be applied as a separate instruction after FMA.
+- **Signed multiply**: IMUL — `$signed(operand1) × $signed(operand2)`, used for gradient computation where errors are signed Q8 values that MUL would misinterpret as large positive numbers
+- **Compare**: CMP — computes `$signed(operand1) - $signed(operand2)`, writes nothing to `result`, only sets `nzp_flag`: N=`3'b100` (negative), Z=`3'b010` (zero), P=`3'b001` (positive)
+
+NZP flag is only meaningful when the opcode is CMP; for all other operations it remains zero.
+
+The `(* syn_dont_touch = 1 *)` attribute prevents synthesis tools from eliminating ALU instances it deems unreachable.
 
 ### 3. Program Counter (`pc.sv`)
 ![PC Diagram](assets/Images-Components/PC-page-00001.jpg)
 
-Per-thread instruction address register. Handles branch evaluation using NZP register. NZP register updated only on CMP via `nzp_en`. Uses independent `if` blocks for `nzp_en` and `pc_en` — critical for correct CMP+BRnzp sequencing.
+Stores the current instruction address and an internal NZP condition register. Both are updated synchronously on the rising clock edge.
+
+Two separate reset paths exist: `rst` (global reset, clears PC and NZP to zero) and `block_rst` (block-level reset, also clears both to zero). `block_rst` fires when the scheduler is in IDLE and `core_start` pulses, ensuring each new thread block begins fetching from instruction 0 rather than continuing from the previous block's RET address.
+
+The NZP register is written only when `nzp_en` is asserted (set by the decoder on CMP instructions). The PC advances only when `pc_en` is asserted (set by the scheduler on the UPDATE→FETCH transition).
+
+Crucially, the `nzp_en` and `pc_en` checks are written as two **independent `if` blocks** inside the same `always_ff`, not `else if`. This means both can fire in the same clock cycle — necessary when a CMP and BRnzp instruction sequence needs the NZP to be written and consumed correctly across pipeline stages.
+
+Branch logic: if `branch_en` is asserted and `(nzp_reg & nzp_mask) != 0`, the PC takes a relative jump: `pc_out <= pc_out + branch_offset`. Otherwise it increments by 1. The 23-bit `branch_offset` is added directly (unsigned addition) so negative offsets must be encoded as two's complement in the 23-bit field.
 
 ### 4. Decoder (`decoder.sv`)
 ![Decoder Diagram](assets/Images-Components/Decoder-page-00001.jpg)
 
-Pure combinational instruction decode. Extracts all fields from the 32-bit instruction word. Generates control signals: `write_back_en`, `mem_read_en`, `mem_write_en`, `branch_en`, `nzp_en`, `ret`.
+Purely combinational instruction decode — no clock, no state. All field extractions are done with continuous `assign` statements directly from bit ranges of the 32-bit instruction word:
+
+- `opcode` = bits [31:26]
+- `rd_addr` = bits [25:21]
+- `rs1_addr` = bits [20:16]
+- `rs2_addr` = bits [15:11]
+- `rs3_addr` = bits [10:6]
+- `imm` = bits [15:0] (overlaps rs2/rs3 fields in I-format)
+- `nzp_mask` = bits [25:23] (B-format, overlaps rd field)
+- `branch_offset` = bits [22:0] (B-format)
+
+Control signal generation uses a case on `opcode` inside `always_comb`. All control signals default to zero; only the relevant ones are set per opcode group:
+
+| Opcode group | Signals asserted |
+|---|---|
+| ALU ops (0x01–0x0C, 0x13, 0x14) | `write_back_en` |
+| CMP (0x0D) | `nzp_en` |
+| BRnzp (0x0E) | `branch_en` |
+| LDR (0x0F) | `mem_read_en`, `write_back_en` |
+| STR (0x10) | `mem_write_en` |
+| CONST (0x11) | `write_back_en` |
+| RET (0x12) | `ret` |
+| NOP (0x00) | _(none)_ |
+
+The decoder does not gate control signals based on pipeline state — that is the scheduler's job. It purely translates the instruction word into control intent.
 
 ### 5. Fetcher (`fetcher.sv`)
 ![Fetcher Diagram](assets/Images-Components/Fetcher-page-00001.jpg)
 
-2-state FSM (IDLE → WAITING). Valid/ready handshake with program memory. One fetcher per core, shared across all threads (SIMD fetch from thread 0's PC).
+2-state FSM (IDLE / WAITING) that issues a single instruction fetch request to program memory and waits for the response. Uses a valid/ready handshake: the fetcher asserts `req_valid` with the PC address, then waits in WAITING until `resp_valid` comes back from memory.
+
+In IDLE: when `core_en` is asserted by the scheduler, the fetcher latches the current PC value into `req_addr`, asserts `req_valid`, and transitions to WAITING.
+
+In WAITING: the fetcher holds until `resp_valid` goes high. On that cycle it latches `resp_data` into `instruction`, pulses `done` for one cycle, and returns to IDLE. `req_valid` and `done` are both cleared to zero at the start of each cycle (default assignment), so they are naturally single-cycle pulses.
+
+One fetcher exists per core and is shared across all threads in that core. Since execution is SIMD, all threads run the same instruction, so a single fetch is sufficient.
 
 ### 6. LSU — Load Store Unit (`lsu.sv`)
 ![LSU Diagram](assets/Images-Components/LSU-page-00001.jpg)
 
-2-state FSM (IDLE → WAITING). Handles LDR and STR with valid/ready handshake. `read_write_switch` signals memory read vs write direction. `is_read` explicitly cleared in the write path to prevent stale state. One LSU per thread.
+2-state FSM (IDLE / WAITING) that handles one memory transaction per instruction — either a load (LDR) or a store (STR). One LSU exists per thread, so all threads in a core can access memory independently in parallel.
+
+In IDLE: when `core_en` is asserted by the scheduler:
+- **LDR path**: sets `is_read=1`, asserts `req_valid`, sets `read_write_switch=1` (signals memory this is a read), latches the computed address into `req_addr`, transitions to WAITING.
+- **STR path**: sets `is_read=0`, asserts `req_valid`, sets `read_write_switch=0` (signals a write), latches the computed address and the store data (`mem_write_data`) into `req_addr` and `write_data`, transitions to WAITING.
+
+In WAITING: waits for `resp_valid`. On a read, latches `resp_data` into `mem_read_data`. On a write, nothing is captured (the data was already sent). Either way, `done` is pulsed and the FSM returns to IDLE.
+
+`is_read` is explicitly set to `0` in the STR path (not just left undefined from prior state), preventing stale-read bugs if a write follows a read.
+
+The store data (`mem_write_data`) is wired in the core to `reg_data3[i]`, which reads from the Rd register address via `r_addr3`. STR semantics: `Memory[Rs + imm] = Rd`, so Rd is both the address-base field in the instruction and the source of the data being written.
 
 ### 7. Memory Controller (`mem_controller.sv`)
 ![Memory Controller Diagram](assets/Images-Components/Memory%20Controller-page-00001.jpg)
 
-Parameterized pass-through (NUM_CORES × THREADS_PER_CORE channels). Direct 1:1 mapping between threads and memory channels. Pure combinational. Round-robin arbitration planned. Note: this module is tested standalone but is not instantiated in the top-level GPU — the top-level wires core data memory ports directly to memory, making the pass-through implicit.
+Parameterized combinational pass-through with `TOTAL_THREADS = NUM_CORES × THREADS_PER_CORE` independent channels. Each channel is a direct wire mapping: LSU request signals (`req_avail`, `req_addr`, `read_write_switch`, `req_data`) pass straight through to the memory request interface, and memory response signals (`mem_resp_valid`, `mem_resp_data`) pass straight back to the LSU.
+
+There is no arbitration, no clock, and no state. Every thread gets its own dedicated memory port — bandwidth scales linearly with thread count at the cost of requiring the memory to support TOTAL_THREADS simultaneous accesses.
+
+The module has no `clk` or `rst` ports; round-robin arbitration is the planned upgrade path. Note: this module is tested standalone but is not instantiated in the top-level GPU — the top-level wires core data memory ports directly, making the pass-through implicit at the top level.
 
 ### 8. Scheduler (`scheduler.sv`)
 ![Scheduler Diagram](assets/Images-Components/Scheduler-page-00001.jpg)
 
-7-state FSM controlling the core pipeline. Broadcasts enable signals to all threads simultaneously (SIMD). Waits for all LSUs via AND-reduction of `lsu_done`. Outputs `pc_en` on the UPDATE→FETCH transition to advance the program counter.
+7-state FSM that sequences the pipeline for one core. All output enables (`fetcher_en`, `lsu_en`, `execute_en`, `write_back_en`, `pc_en`, `block_done`) default to zero every cycle and are asserted only in specific states, making them naturally single-cycle pulses unless explicitly held.
 
 ```
-IDLE    (000) — Wait for core_start
-FETCH   (001) — Enable fetcher, wait for done
-DECODE  (010) — Route to EXECUTE or REQUEST based on instruction type
-REQUEST (011) — Enable LSUs for memory operations
-WAIT    (100) — Wait until all LSUs complete
-EXECUTE (101) — Enable ALUs for computation
-UPDATE  (110) — Write back results, assert pc_en, check RET
+IDLE    (000) — Wait for core_start; on assertion, assert fetcher_en and go to FETCH
+FETCH   (001) — Hold fetcher_en=1; on fetcher_done, clear fetcher_en and go to DECODE
+DECODE  (010) — Combinational route: if mem_read_en or mem_write_en → REQUEST, else → EXECUTE
+REQUEST (011) — Pulse lsu_en=1 for one cycle, go to WAIT
+WAIT    (100) — Stall until all_done (&lsu_done); go to EXECUTE
+EXECUTE (101) — Pulse execute_en=1 for one cycle, go to UPDATE
+UPDATE  (110) — Assert write_back_en=1; if ret: assert block_done=1, go to IDLE
+                else: assert pc_en=1, go to FETCH
 ```
+
+Key behaviours:
+- **DECODE is zero-cycle**: no clock edge is consumed — the state transition is decided combinationally based on the decoded instruction already sitting in the registers. The FSM moves to REQUEST or EXECUTE on the very next edge.
+- **`all_done`** is a bitwise AND reduction of `lsu_done` across all threads (`&lsu_done`). The FSM stays in WAIT until every thread's LSU has completed.
+- **`pc_en` and `write_back_en` are both asserted together in UPDATE** (when not RET): register writeback and PC advance happen on the same clock edge.
+- The scheduler broadcasts the same enables to all threads simultaneously — this is what enforces SIMD lockstep execution.
 
 ### 9. Core (`core.sv`)
 ![Core Diagram](assets/Images-Components/Core-page-00001.jpg)
 
-Instantiates 1 Scheduler, 1 Fetcher, 1 Decoder, and THREADS_PER_CORE instances each of ALU, LSU, and Register File. One shared PC instance is used across all threads (SIMD — all threads execute the same instruction; branch decision uses thread 0's NZP flag as representative). Write-back mux selects: LSU read data for LDR, zero-extended immediate for CONST, ALU result otherwise. STR address computed as `Rs + sign_extend(imm)`, and STR data reads via r_addr3 using Rd.
+The core is the main processing unit. It instantiates one each of Scheduler, Fetcher, Decoder, and PC (all shared across threads), and `THREADS_PER_CORE` instances each of ALU, LSU, and Register File (one per thread).
+
+**Shared resources**: The single Fetcher uses the shared PC (`pc_shared`) to fetch the same instruction for all threads. The Decoder decodes that one instruction into control signals broadcast to all threads. The Scheduler drives all threads with the same enable signals each cycle. This is the SIMD execution model — all threads execute identical instructions, differing only in their data (threadIdx, register values, memory addresses).
+
+**Per-thread datapath** (inside generate loop):
+- Memory address: `mem_addr[i] = reg_data1[i] + sign_extend(imm)` — each thread computes its own address from its own Rs1 value plus the shared immediate.
+- Write-back mux: `lsu_read_data[i]` on LDR, `{16'b0, imm}` on CONST (zero-extended), `alu_result[i]` otherwise.
+- STR source: `r_addr3` is wired to `rd_addr` when `mem_write_en` is set, so the register named as Rd in the STR instruction is read as the store data (not written to).
+
+**Branch decision**: The shared PC uses `nzp_result[0]` — thread 0's NZP flag — as the representative condition for the whole core. Since all threads run the same instructions, divergent branches are not supported; thread 0 is the tie-breaker.
+
+**`pc_block_rst`**: asserted when `current_state == IDLE && core_start`. This resets the PC to 0 at the start of every new block dispatch, so block N+1 starts fetching from instruction 0.
+
+**`thread_keep_alive`**: XOR of all per-thread `write_data` signals, chained through a generate loop and exposed as a primary output. Connecting this to an LED or top-level output forces synthesis tools to trace the entire thread datapath backward from the output, preventing dead-code elimination of threads 1–(N-1).
+
+All per-thread signal arrays carry `(* syn_keep=1 *)` to prevent intermediate signal elimination by the Gowin synthesizer.
 
 ### 10. Dispatcher (`dispatcher.sv`)
 ![Dispatcher Diagram](assets/Images-Components/Dispatcher-page-00001.jpg)
 
-Assigns thread blocks to available cores. One block assigned per core per cycle. Tracks active blocks with a signed delta accumulator using blocking assignments (required to prevent NBA race conditions in always_ff). Asserts `kernel_done` when all blocks processed. Uses packed 2D `blockIdx_out[NUM_CORES-1:0][31:0]` for Icarus compatibility.
+Assigns thread blocks to idle cores and tracks when all blocks have completed. Operates entirely in a single `always_ff` block using a mix of blocking and non-blocking assignments.
+
+**State tracked**:
+- `next_block`: the index of the next unassigned block (starts at 0, increments each time a block is dispatched).
+- `active_blocks`: count of blocks currently executing across all cores.
+
+**Each clock cycle** (when `dispatch_en` is asserted):
+1. Loops over all cores. For any core where `block_done[i]` is high: clears `core_start[i]` and decrements a local blocking variable `delta`.
+2. Finds the first idle core (`core_start[i] == 0 && block_done[i] == 0`) where `next_block < num_blocks`. Assigns it the next block: sets `core_start[i]`, writes `blockIdx_out[i] = next_block`, increments `next_block` and `delta`.
+3. `active_blocks <= active_blocks + delta` — the NBA update applies the net change atomically at the end of the always_ff evaluation.
+
+**`kernel_done`** is asserted when `next_block == num_blocks` (all blocks dispatched) **and** `active_blocks + delta == 0` (all blocks finished). The `delta` term is included so kernel_done can fire on the same cycle the last block completes.
+
+`assigned` and `delta` use blocking assignments because they are loop-local accumulators — they must take effect immediately within the iteration to correctly avoid double-assigning a core in the same cycle.
 
 ### 11. DCR — Device Control Register (`dcr.sv`)
 ![DCR Diagram](assets/Images-Components/DCR-page-00001.jpg)
 
-Host-facing configuration interface. Address 0x00: `num_blocks`. Address 0x01: `block_dim`. Address 0x02: `start` pulse (single cycle).
+Minimal host-facing configuration interface with three registers, written synchronously via a 2-bit address bus. The host (testbench or FPGA boot FSM) writes these registers before asserting `start` to launch a kernel.
+
+| Address | Register | Description |
+|---------|----------|-------------|
+| `2'b00` (0x00) | `num_blocks` | Total number of thread blocks to dispatch |
+| `2'b01` (0x01) | `blockDim` | Threads per block (injected into R31 of every thread) |
+| `2'b10` (0x02) | `start` | Single-cycle pulse that triggers the dispatcher |
+
+`start` is special: it is cleared to `0` at the top of every `always_ff` evaluation and only set to `1` when address `2'b10` is written. This makes it a self-clearing single-cycle pulse regardless of how long the host holds `dcr_write_en` high — unless the host continuously re-writes address `2'b10` every cycle, as the FPGA boot FSM does to keep `dispatch_en` asserted across all 4 sequential blocks.
 
 ### 12. Top-Level GPU (`top_level_gpu.sv`)
 ![GPU Diagram](assets/Images-Components/GPU-page-00001.jpg)
 
-Wires DCR → Dispatcher → Cores → Memory. Parameterized: change NUM_CORES and THREADS_PER_CORE to scale. Uses intermediate wires in generate loop for Icarus VPI unpacked array compatibility.
+The top-level wires together the DCR, Dispatcher, and `NUM_CORES` Core instances into a complete GPU. It is the only module that sees both program memory and data memory interfaces simultaneously.
+
+**Memory architecture**:
+- Each core has its own independent program memory channel (`prog_mem_req_valid[i]`, `prog_mem_req_addr[i]`, etc.) — all cores can fetch different instructions simultaneously if running different blocks.
+- Data memory is a flat array of `TOTAL_THREADS` channels (`data_mem_req_valid[TOTAL_THREADS-1:0]`, etc.) — each thread across all cores has its own dedicated data memory port.
+
+**Generate loop**: For each core, a set of intermediate local wires is declared inside the generate block. This works around an Icarus Verilog limitation where unpacked array part-selects (e.g. `data_mem_req_addr[i*T+j]`) are not directly addressable via VPI in simulation. The intermediate wires are then connected to the top-level flat arrays with explicit `assign` statements.
+
+**`thread_keep_alive`**: XOR of all per-core `thread_keep_alive` signals, again chained through a generate loop. The final XOR is the top-level `thread_keep_alive` output, which in the FPGA wrapper is OR'd into an LED output to anchor the entire thread datapath in synthesis.
 
 ---
 
@@ -184,9 +311,7 @@ AXEL is a C library that emits `.hex` kernel files for the GPU. It provides two 
 cd assembler
 make phase4    # compiles and emits builds/phase4_forward.hex
 make phase5    # compiles and emits builds/phase5_weight_update.hex
-make           # builds all phases (phase1–5)
-make test_add  # low-level gpu_asm API smoke test (4 instructions)
-make test_axel # simple vector addition kernel demo (threadIdx + blockIdx)
+make           # builds all phases
 ```
 
 ### Register aliases
@@ -312,20 +437,19 @@ The `fpga/gpu_combined.v` file differs from the original `.sv` sources in the fo
 - **R29 patch**: `registers.sv` read ports return `blockIdx` when `blockDim == 1`, enabling single-thread blocks to use `blockIdx` as their thread index.
 - **`thread_keep_alive` port**: An XOR reduction of all thread `write_data` signals, added as a primary output to prevent synthesis tools from sweeping thread logic as dead code.
 - **`(* syn_keep=1 *)`**: Applied to per-thread signal arrays to prevent incorrect dead logic elimination by Gowin synthesizer.
-- **`(* syn_dont_touch = 1 *)`**: Applied at module level on `alu` and `registers` to prevent the synthesizer from merging or eliminating those instances.
 - **`$dumpfile`/`$dumpvars` removed**: Simulation-only; breaks synthesis.
 
 ### Pin Assignments (Tang Nano 20K)
 
 | Signal    | Pin | Notes                              |
 |-----------|-----|------------------------------------|
-| clk       | 4   | 27 MHz onboard oscillator (LVCMOS33) |
-| led[0]    | 15  | kernel_done indicator (active-LOW) |
-| led[1]    | 16  | Rolling heartbeat (active-LOW)     |
-| led[2]    | 17  | Rolling heartbeat (active-LOW)     |
-| led[3]    | 18  | Rolling heartbeat (active-LOW)     |
-| led[4]    | 19  | Rolling heartbeat (active-LOW)     |
-| led[5]    | 20  | Rolling heartbeat (active-LOW)     |
+| clk       | 52  | 27 MHz onboard oscillator          |
+| led[0]    | 10  | kernel_done indicator (active-LOW) |
+| led[1]    | 11  | Heartbeat blink (active-LOW)       |
+| led[2]    | 13  |                                    |
+| led[3]    | 14  |                                    |
+| led[4]    | 15  |                                    |
+| led[5]    | 16  |                                    |
 | uart_tx   | 69  | 115200 8N1 → BL616 USB-UART bridge |
 
 ### UART Output
@@ -334,7 +458,7 @@ After flashing, open the higher-numbered COM port at 115200 baud. Output:
 
 ```
 GPU DONE
-T:XXXXXXXX   (clk_slow cycles to kernel_done; 1 cycle = 296 ns at 3.375 MHz)
+T:XXXXXXXX   (clk_slow cycles to kernel_done)
 Y: YYYYYYYY YYYYYYYY YYYYYYYY YYYYYYYY  (Q8 hex, divide by 256 for real value)
 ```
 
@@ -354,14 +478,9 @@ Gowin EDA project settings: Device = GW2AR-18C QN88, Verilog Language = SystemVe
 ## Project Structure
 
 ```
-32-bit-Tiny-GPU/
+gpu-project/
 ├── README.md
-├── Makefile
 ├── .gitignore
-├── make_leaf_schematic.sh             ← generates SVG schematics for each module
-├── .github/
-│   └── workflows/
-│       └── rtl-tests.yml              ← CI/CD: runs make test on push/PR to main
 ├── assembler/
 │   ├── Makefile
 │   ├── include/
@@ -375,9 +494,7 @@ Gowin EDA project settings: Device = GW2AR-18C QN88, Verilog Language = SystemVe
 │   │   ├── phase2_matmul.c
 │   │   ├── phase3_relu.c
 │   │   ├── phase4_forward.c
-│   │   ├── phase5_weight_update.c
-│   │   ├── test_add.c             ← low-level gpu_asm API smoke test
-│   │   └── test_axel.c            ← Axel API vector addition demo
+│   │   └── phase5_weight_update.c
 │   └── builds/
 │       ├── phase4_forward.hex
 │       ├── phase5_weight_update.hex
@@ -389,8 +506,6 @@ Gowin EDA project settings: Device = GW2AR-18C QN88, Verilog Language = SystemVe
 │   ├── data_mem.hex                  ← trained weights + x/t vectors (BRAM init)
 │   └── constraints/
 │       └── gpu_top.cst               ← pin assignments for Tang Nano 20K
-├── schematics/                        ← SVG schematics for each RTL module
-├── assets/                            ← documentation images and PDFs
 └── Src/
     ├── alu/
     ├── registers/
@@ -412,17 +527,6 @@ Gowin EDA project settings: Device = GW2AR-18C QN88, Verilog Language = SystemVe
 
 ---
 
-## CI/CD
-
-The repository runs automated RTL tests on every push and pull request to `main` via GitHub Actions (`.github/workflows/rtl-tests.yml`).
-
-**Pipeline steps:**
-1. Install Icarus Verilog, Make, GCC
-2. Install Python 3.11 + cocotb
-3. Run `make test` (full assembler build + all 40 cocotb tests)
-
----
-
 ## Prerequisites
 
 - [Icarus Verilog](https://steveicarus.github.io/iverilog/) v12.0+
@@ -432,7 +536,6 @@ The repository runs automated RTL tests on every push and pull request to `main`
 - GTKWave (optional, for waveform viewing)
 - [sv2v](https://github.com/zachjs/sv2v) (for FPGA synthesis)
 - Gowin EDA Education Edition (for Tang Nano 20K synthesis and flashing)
-- [yosys](https://github.com/YosysHQ/yosys) + [netlistsvg](https://github.com/nturley/netlistsvg) (optional, for `make_leaf_schematic.sh` SVG schematic generation)
 
 ### Install cocotb
 
@@ -446,25 +549,12 @@ pip install cocotb
 
 ## Running Tests
 
-To run all tests from the repository root (builds assembler first, then runs all module tests):
-
-```bash
-source ~/cocotb-env/bin/activate
-make test
-```
-
-To run tests for a specific module:
+Each module has its own Makefile:
 
 ```bash
 source ~/cocotb-env/bin/activate
 cd Src/<module_name>
 make
-```
-
-To run inference on trained weights:
-
-```bash
-make infer
 ```
 
 ### Test Results
@@ -494,6 +584,9 @@ The NZP flag is only consumed by BRnzp for PC updates. Keeping it co-located wit
 **Why 1:1 memory controller mapping?**
 Simplicity for the initial implementation. The memory controller is designed for round-robin arbitration as a future upgrade — `clk` and `rst` are already stubbed out with comments.
 
+**Why is the memory controller not instantiated in the top-level GPU?**
+The current `mem_controller.sv` is a combinational pass-through — every output is a direct `assign` of its corresponding input. Inserting it into the top-level hierarchy would add a module boundary with no functional effect. It is developed and tested standalone so the round-robin arbitration upgrade can be dropped in without touching the top-level wiring. Once arbitration logic exists, the module connects between the cores and the external memory ports.
+
 **Why `write_back_en_sched` vs `write_back_en_dec`?**
 The decoder's `write_back_en` indicates whether the instruction type requires a writeback. The scheduler's version is the actual enable signal gated by pipeline timing, allowing the scheduler to control writeback independently of instruction type.
 
@@ -518,6 +611,7 @@ With THREADS_PER_CORE=1, there is no parallelism benefit from per-thread PCs. Sy
 
 - Icarus Verilog does not support unpacked array part-selects — intermediate wires used as workaround in the top-level generate block
 - Memory controller is a pass-through with no arbitration — round-robin planned
+- `memory_controller.sv` is not instantiated in `top_level_gpu.sv` — cores wire directly to memory ports (equivalent to pass-through at current implementation stage)
 - Fetcher is shared per core and uses thread 0's PC only (SIMD intentional; multi-PC fetch not supported)
 - No hazard detection or pipeline stalling between back-to-back instructions
 - Decoder generates ~32 "constant selects in always_*" warnings from Icarus (cosmetic — simulation correct; fix: move static field assignments to `assign` statements outside `always_comb`)
