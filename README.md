@@ -114,7 +114,7 @@ Pure combinational instruction decode. Extracts all fields from the 32-bit instr
 ### 7. Memory Controller (`mem_controller.sv`)
 ![Memory Controller Diagram](assets/Images-Components/Memory%20Controller-page-00001.jpg)
 
-Parameterized pass-through (NUM_CORES × THREADS_PER_CORE channels). Direct 1:1 mapping between threads and memory channels. Pure combinational. Round-robin arbitration planned.
+Parameterized pass-through (NUM_CORES × THREADS_PER_CORE channels). Direct 1:1 mapping between threads and memory channels. Pure combinational. Round-robin arbitration planned. Note: this module is tested standalone but is not instantiated in the top-level GPU — the top-level wires core data memory ports directly to memory, making the pass-through implicit.
 
 ### 8. Scheduler (`scheduler.sv`)
 ![Scheduler Diagram](assets/Images-Components/Scheduler-page-00001.jpg)
@@ -144,7 +144,7 @@ Assigns thread blocks to available cores. One block assigned per core per cycle.
 ### 11. DCR — Device Control Register (`dcr.sv`)
 ![DCR Diagram](assets/Images-Components/DCR-page-00001.jpg)
 
-Host-facing configuration interface. Address 0x00: `num_blocks`. Address 0x01: `block_dim`. Address 0x10: `start` pulse (single cycle).
+Host-facing configuration interface. Address 0x00: `num_blocks`. Address 0x01: `block_dim`. Address 0x02: `start` pulse (single cycle).
 
 ### 12. Top-Level GPU (`top_level_gpu.sv`)
 ![GPU Diagram](assets/Images-Components/GPU-page-00001.jpg)
@@ -184,7 +184,9 @@ AXEL is a C library that emits `.hex` kernel files for the GPU. It provides two 
 cd assembler
 make phase4    # compiles and emits builds/phase4_forward.hex
 make phase5    # compiles and emits builds/phase5_weight_update.hex
-make           # builds all phases
+make           # builds all phases (phase1–5)
+make test_add  # low-level gpu_asm API smoke test (4 instructions)
+make test_axel # simple vector addition kernel demo (threadIdx + blockIdx)
 ```
 
 ### Register aliases
@@ -310,19 +312,20 @@ The `fpga/gpu_combined.v` file differs from the original `.sv` sources in the fo
 - **R29 patch**: `registers.sv` read ports return `blockIdx` when `blockDim == 1`, enabling single-thread blocks to use `blockIdx` as their thread index.
 - **`thread_keep_alive` port**: An XOR reduction of all thread `write_data` signals, added as a primary output to prevent synthesis tools from sweeping thread logic as dead code.
 - **`(* syn_keep=1 *)`**: Applied to per-thread signal arrays to prevent incorrect dead logic elimination by Gowin synthesizer.
+- **`(* syn_dont_touch = 1 *)`**: Applied at module level on `alu` and `registers` to prevent the synthesizer from merging or eliminating those instances.
 - **`$dumpfile`/`$dumpvars` removed**: Simulation-only; breaks synthesis.
 
 ### Pin Assignments (Tang Nano 20K)
 
 | Signal    | Pin | Notes                              |
 |-----------|-----|------------------------------------|
-| clk       | 52  | 27 MHz onboard oscillator          |
-| led[0]    | 10  | kernel_done indicator (active-LOW) |
-| led[1]    | 11  | Heartbeat blink (active-LOW)       |
-| led[2]    | 13  |                                    |
-| led[3]    | 14  |                                    |
-| led[4]    | 15  |                                    |
-| led[5]    | 16  |                                    |
+| clk       | 4   | 27 MHz onboard oscillator (LVCMOS33) |
+| led[0]    | 15  | kernel_done indicator (active-LOW) |
+| led[1]    | 16  | Rolling heartbeat (active-LOW)     |
+| led[2]    | 17  | Rolling heartbeat (active-LOW)     |
+| led[3]    | 18  | Rolling heartbeat (active-LOW)     |
+| led[4]    | 19  | Rolling heartbeat (active-LOW)     |
+| led[5]    | 20  | Rolling heartbeat (active-LOW)     |
 | uart_tx   | 69  | 115200 8N1 → BL616 USB-UART bridge |
 
 ### UART Output
@@ -331,7 +334,7 @@ After flashing, open the higher-numbered COM port at 115200 baud. Output:
 
 ```
 GPU DONE
-T:XXXXXXXX   (clk_slow cycles to kernel_done)
+T:XXXXXXXX   (clk_slow cycles to kernel_done; 1 cycle = 296 ns at 3.375 MHz)
 Y: YYYYYYYY YYYYYYYY YYYYYYYY YYYYYYYY  (Q8 hex, divide by 256 for real value)
 ```
 
@@ -351,9 +354,14 @@ Gowin EDA project settings: Device = GW2AR-18C QN88, Verilog Language = SystemVe
 ## Project Structure
 
 ```
-gpu-project/
+32-bit-Tiny-GPU/
 ├── README.md
+├── Makefile
 ├── .gitignore
+├── make_leaf_schematic.sh             ← generates SVG schematics for each module
+├── .github/
+│   └── workflows/
+│       └── rtl-tests.yml              ← CI/CD: runs make test on push/PR to main
 ├── assembler/
 │   ├── Makefile
 │   ├── include/
@@ -367,7 +375,9 @@ gpu-project/
 │   │   ├── phase2_matmul.c
 │   │   ├── phase3_relu.c
 │   │   ├── phase4_forward.c
-│   │   └── phase5_weight_update.c
+│   │   ├── phase5_weight_update.c
+│   │   ├── test_add.c             ← low-level gpu_asm API smoke test
+│   │   └── test_axel.c            ← Axel API vector addition demo
 │   └── builds/
 │       ├── phase4_forward.hex
 │       ├── phase5_weight_update.hex
@@ -379,6 +389,8 @@ gpu-project/
 │   ├── data_mem.hex                  ← trained weights + x/t vectors (BRAM init)
 │   └── constraints/
 │       └── gpu_top.cst               ← pin assignments for Tang Nano 20K
+├── schematics/                        ← SVG schematics for each RTL module
+├── assets/                            ← documentation images and PDFs
 └── Src/
     ├── alu/
     ├── registers/
@@ -400,6 +412,17 @@ gpu-project/
 
 ---
 
+## CI/CD
+
+The repository runs automated RTL tests on every push and pull request to `main` via GitHub Actions (`.github/workflows/rtl-tests.yml`).
+
+**Pipeline steps:**
+1. Install Icarus Verilog, Make, GCC
+2. Install Python 3.11 + cocotb
+3. Run `make test` (full assembler build + all 40 cocotb tests)
+
+---
+
 ## Prerequisites
 
 - [Icarus Verilog](https://steveicarus.github.io/iverilog/) v12.0+
@@ -409,6 +432,7 @@ gpu-project/
 - GTKWave (optional, for waveform viewing)
 - [sv2v](https://github.com/zachjs/sv2v) (for FPGA synthesis)
 - Gowin EDA Education Edition (for Tang Nano 20K synthesis and flashing)
+- [yosys](https://github.com/YosysHQ/yosys) + [netlistsvg](https://github.com/nturley/netlistsvg) (optional, for `make_leaf_schematic.sh` SVG schematic generation)
 
 ### Install cocotb
 
@@ -422,12 +446,25 @@ pip install cocotb
 
 ## Running Tests
 
-Each module has its own Makefile:
+To run all tests from the repository root (builds assembler first, then runs all module tests):
+
+```bash
+source ~/cocotb-env/bin/activate
+make test
+```
+
+To run tests for a specific module:
 
 ```bash
 source ~/cocotb-env/bin/activate
 cd Src/<module_name>
 make
+```
+
+To run inference on trained weights:
+
+```bash
+make infer
 ```
 
 ### Test Results

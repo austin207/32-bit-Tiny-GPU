@@ -919,7 +919,7 @@ module gpu (
 		.blockDim(blockDim),
 		.start(start)
 	);
-	dispatcher dispatcher_inst(
+	dispatcher #(.NUM_CORES(NUM_CORES)) dispatcher_inst(
 		.clk(clk),
 		.rst(rst),
 		.dispatch_en(start),
