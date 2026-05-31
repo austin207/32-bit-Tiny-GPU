@@ -475,6 +475,97 @@ Gowin EDA project settings: Device = GW2AR-18C QN88, Verilog Language = SystemVe
 
 ---
 
+## Silicon — Sky130A ASIC Synthesis
+
+The full 4-core 4-thread GPU has been synthesized through the complete RTL-to-GDSII flow using OpenLane 2.3.10 targeting the SkyWater Sky130A open-source 130nm PDK.
+
+### Layout
+
+![GPU Layout](assets/gds/gpu_layout.png)
+
+The layout above shows the complete chip with all metal layers visible (poly, li1, met1 through met5). The four parallel compute cores are visible as distinct regions in the dense logic area.
+
+### Results
+
+| Metric | Value |
+|--------|-------|
+| Standard cells | 204,938 |
+| Chip area | 1.977 mm² |
+| Flip-flops | 16,138 |
+| Clock target | 40 MHz (25ns period) |
+| Worst setup slack | +8.01ns (timing met) |
+| Max achievable frequency | ~59 MHz |
+| Total negative slack | 0 ps |
+| LVS result | Passed (171,278 devices, 171,969 nets matched) |
+| PDK | SkyWater Sky130A (130nm) |
+| Tool | OpenLane 2.3.10 / OpenROAD |
+
+### The Road to GDS — Three Days of Decisions
+
+Getting a 204k-cell GPU through the full open-source ASIC flow was not straightforward. This section documents every failure, root cause, and fix in the order they were discovered.
+
+**RTL preparation**
+
+Before synthesis, two changes were made to `gpu_combined.v`. The DIV and MOD operators synthesize to deep combinational dividers that prevent timing closure — both were replaced with `32'b0` and documented as multi-cycle paths planned for a future iterative divider implementation. All `$dumpfile` and `$dumpvars` calls were already removed from the FPGA combined file. Everything else synthesized cleanly with zero linter errors.
+
+**OpenLane 1 — synthesis passed, routing did not**
+
+The first runs used OpenLane 1 (image `ff5509f`). Synthesis completed successfully in every run, producing consistent results: 204,938 cells, 1.977mm², +8.01ns slack. The problem was entirely in physical implementation.
+
+Placement failed first with `GPL-0302` (density too low). Increasing `PL_TARGET_DENSITY` from 0.35 to 0.55 and `FP_CORE_UTIL` to 50 fixed placement, and runs 1 through 12 passed cleanly including clock tree synthesis.
+
+Global routing then failed with `GRT-0119` (congestion too high). The root cause was the placement resizer: it was inserting 44,920 timing repair buffers post-placement, bloating the design from 204k to 293k cells before the router saw it. Disabling all four resizer passes (`GLB_RESIZER_DESIGN_OPTIMIZATIONS`, `GLB_RESIZER_TIMING_OPTIMIZATIONS`, `PL_RESIZER_DESIGN_OPTIMIZATIONS`, `PL_RESIZER_TIMING_OPTIMIZATIONS`) stopped the bloat. Dropping `GRT_ADJUSTMENT` from the default 0.30 to 0.10 gave the router 90% of available metal tracks instead of 70%.
+
+After those fixes, global routing passed with 0/0/0 overflow on all layers, 169,343 nets routed, 28.58% total track usage. But the OpenROAD process then crashed with a segmentation fault at address `0x0000000000D3C6C7` — the same address in every run, indicating a deterministic code bug in the FastRoute implementation in that specific OpenROAD binary. No configuration change can fix a code bug.
+
+**WSL2 hardware instability**
+
+Several runs on Windows WSL2 ended in hard system hangs. The cause was a combination of factors: WSL2 defaulting to 15GB RAM on a 32GB machine (insufficient for TritonRoute peak usage), NVIDIA overlay process conflicts, and AMD integrated GPU driver crashes (`amdkmdag.sys`) under sustained memory pressure. WSL2 memory was increased to 24GB via `.wslconfig`, NVIDIA overlay was disabled, and Docker cores were reduced to avoid peak memory spikes. The system still crashed. WSL2 was abandoned.
+
+**OpenLane 2 on native Ubuntu**
+
+Switching to native Ubuntu dualboot eliminated all hardware instability immediately. With no WSL2 overhead, the full 32GB was available directly to Docker.
+
+OpenLane 1 was frozen at `ff5509f` with no newer image. The successor is OpenLane 2 (`efabless/openlane2:2.3.10`), which uses a significantly newer OpenROAD binary. The segfault at the same address never appeared again.
+
+The resizer issue resurfaced in OpenLane 2 in a different form: the default flow inserted 36,465 timing repair buffers and 8,455 hold buffers post-CTS, again bloating cell count to 293k before global routing. With the design already having +8.01ns slack at synthesis, these optimizations were unnecessary and actively harmful. All resizers were disabled.
+
+Global routing passed cleanly in OpenLane 2 with the same 0/0/0 overflow result as before. The run then crashed during the post-routing antenna violation report generation inside the OpenROAD script. The fix was disabling the antenna checker (`GRT_ANTENNA_ITERS: 0`) and resuming directly from the saved global routing state into detailed routing.
+
+Detailed routing (TritonRoute) ran for approximately 5 hours on 1 thread to avoid memory pressure, then completed. DRC showed 5 Magic and 1 KLayout violation — minor metal spacing issues from the open-source router, not functional failures. LVS passed perfectly with all 171,278 devices and 171,969 nets matched. GDS was generated.
+
+**Final working OpenLane 2 config**
+
+```json
+{
+    "DESIGN_NAME": "gpu",
+    "VERILOG_FILES": "dir::src/*.v",
+    "CLOCK_PORT": "clk",
+    "CLOCK_NET": "clk",
+    "CLOCK_PERIOD": 25,
+    "FP_CORE_UTIL": 25,
+    "PL_TARGET_DENSITY_PCT": 35,
+    "SYNTH_STRATEGY": "AREA 0",
+    "MAX_FANOUT_CONSTRAINT": 8,
+    "RUN_POST_GPL_DESIGN_REPAIR": false,
+    "RUN_POST_CTS_RESIZER_TIMING": false,
+    "GRT_RESIZER_DESIGN_OPTIMIZATIONS": false,
+    "GRT_RESIZER_TIMING_OPTIMIZATIONS": false,
+    "GRT_ADJUSTMENT": 0.1,
+    "DRT_THREADS": 1,
+    "PDK": "sky130A",
+    "STD_CELL_LIBRARY": "sky130_fd_sc_hd"
+}
+```
+
+**Key lessons**
+
+The single most impactful discovery was that the OpenLane resizer, when left enabled on a design with substantial positive slack, produces a net negative result: it adds tens of thousands of buffers that congest routing without meaningfully improving timing. Disabling all resizers and routing the synthesized netlist directly was the correct approach for this design.
+
+The second lesson: OpenLane 1 is frozen. For any new design targeting Sky130, OpenLane 2 with Docker is the correct starting point. The newer OpenROAD binary eliminated the deterministic segfault that blocked every OpenLane 1 routing attempt.
+
+The third lesson: open-source ASIC flows are not designed for 200k+ cell designs on consumer hardware. The flow completed, but required careful management of memory limits, parallelism, and step-by-step resumption. Professional tools handle this scale routinely. The synthesis and GDS results are real Sky130 numbers regardless of the tooling path taken to produce them.
+
 ## Project Structure
 
 ```
