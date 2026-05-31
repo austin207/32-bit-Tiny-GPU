@@ -1,0 +1,42 @@
+144. Printing statistics.
+
+=== gpu ===
+
+   Number of wires:             232150
+   Number of wire bits:         250175
+   Number of public wires:         659
+   Number of public wire bits:   18555
+   Number of ports:                 17
+   Number of port bits:           1918
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:             249281
+     $_ANDNOT_                   80147
+     $_AND_                       1792
+     $_MUX_                      28719
+     $_NAND_                      1552
+     $_NOR_                      12981
+     $_NOT_                      19505
+     $_ORNOT_                     5347
+     $_OR_                       53417
+     $_XNOR_                      9347
+     $_XOR_                      19804
+     sky130_fd_sc_hd__dfrtp_2    16138
+     sky130_fd_sc_hd__dfstp_2        4
+     sky130_fd_sc_hd__dfxtp_2      528
+
+   Area for cell type $_NOT_ is unknown!
+   Area for cell type $_AND_ is unknown!
+   Area for cell type $_NAND_ is unknown!
+   Area for cell type $_OR_ is unknown!
+   Area for cell type $_NOR_ is unknown!
+   Area for cell type $_XOR_ is unknown!
+   Area for cell type $_XNOR_ is unknown!
+   Area for cell type $_ANDNOT_ is unknown!
+   Area for cell type $_ORNOT_ is unknown!
+   Area for cell type $_MUX_ is unknown!
+
+   Chip area for module '\gpu': 435365.049600
+     of which used for sequential elements: 435365.049600 (100.00%)
+
