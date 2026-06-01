@@ -4,9 +4,9 @@ CFLAGS = -Wall -Iinclude
 SRCS   = src/axel.c src/gpu_asm.c
 BUILD  = builds
 
-.PHONY: all clean test_add test_axel phase1 phase2 phase3 phase4 phase5
+.PHONY: all clean test_add test_axel phase1 phase2 phase3 phase4 phase5 phase6
 
-all: phase1 phase2 phase3 phase4 phase5
+all: phase1 phase2 phase3 phase4 phase5 phase6
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -38,6 +38,10 @@ phase4: $(BUILD)
 phase5: $(BUILD)
 	$(CC) $(CFLAGS) examples/phase5_weight_update.c $(SRCS) -o $(BUILD)/phase5
 	cd $(BUILD) && ./phase5
+
+phase6: $(BUILD)
+	$(CC) $(CFLAGS) examples/phase6_simt_relu.c $(SRCS) -o $(BUILD)/phase6
+	cd $(BUILD) && ./phase6
 
 clean:
 	rm -rf $(BUILD)

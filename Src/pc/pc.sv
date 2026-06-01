@@ -9,7 +9,8 @@
     input logic nzp_en,
     input logic [2:0] nzp_flag,
     input logic [2:0] nzp_mask,
-    output logic [31:0] pc_out
+    output logic [31:0] pc_out,
+    output logic [2:0] nzp_out
 );
 
 logic [2:0] nzp_reg;
@@ -35,5 +36,7 @@ always_ff @(posedge clk or posedge rst) begin
         end
     end
 end
+
+assign nzp_out = nzp_reg;
 
 endmodule

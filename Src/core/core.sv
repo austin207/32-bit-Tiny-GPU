@@ -32,10 +32,11 @@ module core #(
 
 logic divergence_detected;
 logic [THREADS_PER_CORE-1:0] taken_mask;
+logic [2:0] nzp_stored [THREADS_PER_CORE-1:0];
 
 always_comb begin
     for (int i = 0; i < THREADS_PER_CORE; i++) begin
-        taken_mask[i] = branch_en & ((nzp_result[i] & nzp_mask) != 3'b000) & active_mask[i];
+        taken_mask[i] = branch_en & ((nzp_stored[i] & nzp_mask) != 3'b000) & active_mask[i];
     end
 
     divergence_detected = branch_en & (taken_mask != active_mask) & (taken_mask != '0);
@@ -43,7 +44,7 @@ end
 
 // ── Scheduler outputs ────────────────────────────────────────────────────────
 logic fetcher_en, lsu_en, execute_en, write_back_en_sched, pc_en;
-logic [2:0] current_state;
+logic [3:0] current_state;
 
 // ── Fetcher outputs ──────────────────────────────────────────────────────────
 logic [31:0] instruction;
@@ -80,7 +81,7 @@ logic [THREADS_PER_CORE-1:0] active_mask;
 // Fires when scheduler is in IDLE (3'b000) and core_start pulses (IDLE→FETCH).
 // Ensures block N+1 fetches from instruction 0, not block N's RET address.
 logic pc_block_rst;
-assign pc_block_rst = (current_state == 3'b000) && core_start;
+assign pc_block_rst = (current_state == 4'b0000) && core_start;
 
 // ── Scheduler ────────────────────────────────────────────────────────────────
 scheduler #(
@@ -105,7 +106,7 @@ scheduler #(
     .taken_mask(taken_mask),
     .active_mask(active_mask),
     .sync_en(sync_en),
-    .saved_mask({THREADS_PER_CORE{1'b1}})
+    .saved_mask(ws_stack_empty ? {THREADS_PER_CORE{1'b1}} : ws_top_saved_mask)
 );
 
 logic [31:0] active_pc;
@@ -121,6 +122,31 @@ end
 
 logic [31:0] sync_pc;
 assign sync_pc = active_pc + {21'b0, sync_offset};
+
+// ── Warp Stack ───────────────────────────────────────────────────────────────
+logic ws_push, ws_pop;
+logic [31:0] ws_top_sync_pc;
+logic [THREADS_PER_CORE-1:0] ws_top_saved_mask;
+logic ws_stack_empty, ws_stack_full, ws_stack_overflow;
+
+assign ws_push = (current_state == 4'b0111);
+assign ws_pop  = (current_state == 4'b1000);
+
+warp_stack #(
+    .THREADS_PER_CORE(THREADS_PER_CORE)
+) ws (
+    .clk             (clk),
+    .rst             (rst),
+    .push            (ws_push),
+    .push_sync_pc    (sync_pc),
+    .push_saved_mask (~taken_mask & active_mask),
+    .pop             (ws_pop),
+    .top_sync_pc     (ws_top_sync_pc),
+    .top_saved_mask  (ws_top_saved_mask),
+    .stack_empty     (ws_stack_empty),
+    .stack_full      (ws_stack_full),
+    .stack_overflow  (ws_stack_overflow)
+);
 
 // ── Fetcher ──────────────────────────────────────────────────────────
 fetcher fetch (
@@ -157,7 +183,7 @@ decoder dec (
     .sync_en      (sync_en)
 );
 
-// ── Per-thread generate: ALU, LSU, Register File ─────────────────────────────
+// ── Per-thread generate: ALU, LSU, Register File, PC ─────────────────────────────
 genvar i;
 (* syn_keep=1 *) logic [31:0] write_data [THREADS_PER_CORE-1:0];
 
@@ -218,13 +244,14 @@ generate
             .clk          (clk),
             .rst          (rst),
             .block_rst    (pc_block_rst),
-            .pc_en        (pc_en),
+            .pc_en        (pc_en & active_mask[i]),
             .branch_en    (branch_en),
             .branch_offset(branch_offset),
             .nzp_en       (nzp_en),
             .nzp_flag     (nzp_result[i]),   // each thread uses its own NZP
             .nzp_mask     (nzp_mask),
-            .pc_out       (pc_out[i])
+            .pc_out       (pc_out[i]),
+            .nzp_out      (nzp_stored[i])
         );
     end
 endgenerate

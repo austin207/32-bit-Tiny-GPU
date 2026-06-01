@@ -227,3 +227,77 @@ async def test_gpu_axel_program(dut):
 
     for _ in range(50):
         await RisingEdge(dut.clk)
+
+@cocotb.test()
+async def test_simt_relu(dut):
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+
+    base = os.path.dirname(__file__)
+    RELU_HEX = "../../assembler/builds/phase6_simt_relu.hex"
+    instructions = load_hex_file(os.path.join(base, RELU_HEX))
+
+    # Pre-load: T0=+5, T1=-3, T2=+8, T3=-1
+    data_memory = {
+        0: 5,
+        1: 0xFFFFFFFD,
+        2: 8,
+        3: 0xFFFFFFFF
+    }
+
+    dut.rst.value          = 1
+    dut.dcr_write_en.value = 0
+    dut.prog_mem_resp_valid.value = 0
+    for i in range(NUM_CORES):
+        dut.prog_mem_resp_data[i].value = 0
+    dut.data_mem_resp_valid.value = 0
+    for i in range(TOTAL_THREADS):
+        dut.data_mem_resp_data[i].value = 0
+
+    instructions_ref = [instructions]
+    cocotb.start_soon(program_memory_model(dut, instructions_ref))
+    cocotb.start_soon(data_memory_model(dut, data_memory))
+
+    for _ in range(3):
+        await RisingEdge(dut.clk)
+    dut.rst.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    # Dispatch: 1 block, blockDim=4
+    dut.dcr_write_en.value = 1
+    dut.dcr_addr.value     = 0b00
+    dut.dcr_data.value     = 1
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+    dut.dcr_addr.value = 0b01
+    dut.dcr_data.value = 4
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+    dut.dcr_addr.value = 0b10
+    dut.dcr_data.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+    dut.dcr_write_en.value = 0
+
+    # Wait for kernel_done
+    for _ in range(5000):
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
+        if dut.kernel_done.value == 1:
+            break
+
+    assert dut.kernel_done.value == 1, "Kernel never completed — hung"
+
+    # Verify ReLU results
+    assert data_memory.get(4, None) == 5,          f"T0: expected 5,  got {data_memory.get(4)}"
+    assert data_memory.get(5, None) == 0,          f"T1: expected 0,  got {data_memory.get(5)}"
+    assert data_memory.get(6, None) == 8,          f"T2: expected 8,  got {data_memory.get(6)}"
+    assert data_memory.get(7, None) == 0,          f"T3: expected 0,  got {data_memory.get(7)}"
+
+    print("\n── SIMT ReLU Results ──")
+    print(f"  mem[4] = {data_memory.get(4)}  (T0: +5 → kept)  ✓")
+    print(f"  mem[5] = {data_memory.get(5)}  (T1: -3 → zeroed) ✓")
+    print(f"  mem[6] = {data_memory.get(6)}  (T2: +8 → kept)  ✓")
+    print(f"  mem[7] = {data_memory.get(7)}  (T3: -1 → zeroed) ✓")

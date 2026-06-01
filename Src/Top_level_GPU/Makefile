@@ -1,5 +1,6 @@
 TOPLEVEL_LANG = verilog
 VERILOG_SOURCES = $(shell pwd)/top_level_gpu.sv \
+                  $(shell pwd)/../warp_stack/warp_stack.sv \
                   $(shell pwd)/../device_control_register/dcr.sv \
                   $(shell pwd)/../dispatcher/dispatcher.sv \
                   $(shell pwd)/../core/core.sv \
