@@ -82,8 +82,8 @@ void axel_const(AxelGPU *gpu, uint8_t rd, uint16_t imm) {
     emit_const(&gpu->program, rd, imm);
 }
 
-void axel_brnzp(AxelGPU *gpu, uint8_t nzp, uint32_t pc_offset) {
-    emit_brnzp(&gpu->program, nzp, pc_offset);
+void axel_brnzp(AxelGPU *gpu, uint8_t nzp, uint32_t sync_offset, uint32_t branch_offset) {
+    emit_brnzp(&gpu->program, nzp, sync_offset, branch_offset);
 }
 
 void axel_nop(AxelGPU *gpu) {
@@ -92,5 +92,9 @@ void axel_nop(AxelGPU *gpu) {
 
 void axel_ret(AxelGPU *gpu) {
     emit_ret(&gpu->program);
+}
+
+void axel_sync(AxelGPU *gpu) {
+    emit_sync(&gpu->program);
 }
 

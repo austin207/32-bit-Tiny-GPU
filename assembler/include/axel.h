@@ -70,8 +70,9 @@ void axel_fma(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2, uint8_t rs3);
 void axel_ldr(AxelGPU *gpu, uint8_t rd, uint8_t rs, uint16_t imm);
 void axel_str(AxelGPU *gpu, uint8_t rd, uint8_t rs, uint16_t imm);
 void axel_const(AxelGPU *gpu, uint8_t rd, uint16_t imm);
-void axel_brnzp(AxelGPU *gpu, uint8_t nzp, uint32_t pc_offset);
+void axel_brnzp(AxelGPU *gpu, uint8_t nzp, uint32_t sync_offset, uint32_t branch_offset);
 void axel_nop(AxelGPU *gpu);
 void axel_ret(AxelGPU *gpu);
+void axel_sync(AxelGPU *gpu);
 
 #endif

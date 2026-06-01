@@ -24,6 +24,7 @@
 #define OP_RET 0x12
 #define OP_IMUL 0x13
 #define OP_SAR 0x14
+#define OP_SYNC 0x15
 
 typedef struct {
     uint32_t instructions[256];
@@ -51,8 +52,8 @@ void emit_fma(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2, uint8_t rs
 void emit_ldr(GPUProgram *prog, uint8_t rd, uint8_t rs, uint16_t imm);
 void emit_str(GPUProgram *prog, uint8_t rd, uint8_t rs, uint16_t imm);
 void emit_const(GPUProgram *prog, uint8_t rd, uint16_t imm);
-void emit_brnzp(GPUProgram *prog, uint8_t nzp, uint32_t pc_offset);
+void emit_brnzp(GPUProgram *prog, uint8_t nzp, uint32_t sync_offset, uint32_t branch_offset);
 void emit_nop(GPUProgram *prog);
 void emit_ret(GPUProgram *prog);
-
+void emit_sync(GPUProgram *prog);
 #endif // GPU_ASM_H

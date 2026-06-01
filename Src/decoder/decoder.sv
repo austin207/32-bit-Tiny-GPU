@@ -8,7 +8,9 @@ module decoder (
     output logic [4:0]  rs3_addr,
     output logic [15:0] imm,
     output logic [2:0]  nzp_mask,
-    output logic [22:0] branch_offset,
+    output logic [10:0] sync_offset,
+    output logic [11:0] branch_offset,
+    output logic sync_en,
 
     output logic ret,
     output logic write_back_en,
@@ -26,8 +28,8 @@ module decoder (
     assign rs3_addr      = instruction[10:6];
     assign imm           = instruction[15:0];
     assign nzp_mask      = instruction[25:23];
-    assign branch_offset = instruction[22:0];
-
+    assign sync_offset   = instruction[22:12];
+    assign branch_offset = instruction[11:0];
     // Control signal decoding
     always_comb begin
         ret           = 1'b0;
@@ -36,6 +38,7 @@ module decoder (
         mem_write_en  = 1'b0;
         branch_en     = 1'b0;
         nzp_en        = 1'b0;
+        sync_en       = 1'b0;
 
         case (opcode)
             6'h00: begin
@@ -79,6 +82,11 @@ module decoder (
             6'h12: begin
                 // RET
                 ret = 1'b1;
+            end
+
+            6'h15: begin
+                // SYNC
+                sync_en = 1'b1;
             end
 
             default: begin

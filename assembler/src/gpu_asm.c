@@ -17,10 +17,11 @@ uint32_t encode_i(uint8_t op, uint8_t rd, uint8_t rs, uint16_t imm) {
             (uint32_t) imm;
 }
 
-uint32_t encode_b(uint8_t op, uint8_t nzp, uint32_t pc_offset) {
-    return  ((uint32_t) op << 26)  |
-            ((uint32_t) nzp << 23) |
-            (pc_offset & 0x7FFFFF);
+uint32_t encode_b(uint8_t op, uint8_t nzp, uint32_t sync_offset, uint32_t branch_offset) {
+    return  ((uint32_t) op << 26)           |
+            ((uint32_t) nzp << 23)          |
+            ((sync_offset  & 0x7FF) << 12)  |
+            (branch_offset & 0xFFF);
 }
 
 uint32_t encode_n(uint8_t op) {
@@ -99,8 +100,8 @@ void emit_const(GPUProgram *prog, uint8_t rd, uint16_t imm) {
     prog->instructions[prog->count++] = encode_i(OP_CONST, rd, 0, imm); 
 }
 
-void emit_brnzp(GPUProgram *prog, uint8_t nzp, uint32_t pc_offset) {
-    prog->instructions[prog->count++] = encode_b(OP_BRnzp, nzp, pc_offset); 
+void emit_brnzp(GPUProgram *prog, uint8_t nzp, uint32_t sync_offset, uint32_t branch_offset) {
+    prog->instructions[prog->count++] = encode_b(OP_BRnzp, nzp, sync_offset, branch_offset);
 }
 
 void emit_nop(GPUProgram *prog) {
@@ -109,6 +110,10 @@ void emit_nop(GPUProgram *prog) {
 
 void emit_ret(GPUProgram *prog) {
     prog->instructions[prog->count++] = encode_n(OP_RET);
+}
+
+void emit_sync(GPUProgram *prog) {
+    prog->instructions[prog->count++] = encode_n(OP_SYNC);
 }
 
 void gpu_program_init(GPUProgram *prog) {

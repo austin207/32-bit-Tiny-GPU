@@ -45,8 +45,9 @@ logic [5:0]  opcode;
 logic [4:0]  rd_addr, rs1_addr, rs2_addr, rs3_addr;
 logic [15:0] imm;
 logic [2:0]  nzp_mask;
-logic [22:0] branch_offset;
-logic ret, write_back_en_dec, mem_read_en, mem_write_en, branch_en, nzp_en;
+logic [10:0] sync_offset;
+logic [11:0] branch_offset;
+logic ret, write_back_en_dec, mem_read_en, mem_write_en, branch_en, nzp_en, sync_en;
 
 // ── Per-thread arrays ────────────────────────────────────────────────────────
 (* syn_keep=1 *) logic [31:0] alu_result    [THREADS_PER_CORE-1:0];
@@ -59,7 +60,9 @@ logic ret, write_back_en_dec, mem_read_en, mem_write_en, branch_en, nzp_en;
 (* syn_keep=1 *) logic [31:0] mem_addr      [THREADS_PER_CORE-1:0];
 
 // Shared PC — single instance for all threads (SIMD).
-logic [31:0] pc_shared;
+logic [31:0] pc_out [THREADS_PER_CORE-1:0];
+logic [THREADS_PER_CORE-1:0] active_mask;
+assign active_mask = {THREADS_PER_CORE{1'b1}}; 
 
 // pc_block_rst: resets PC to 0 at the start of each new block.
 // Fires when scheduler is in IDLE (3'b000) and core_start pulses (IDLE→FETCH).
@@ -88,12 +91,12 @@ scheduler #(
     .pc_en        (pc_en)
 );
 
-// ── Fetcher — uses shared PC ─────────────────────────────────────────────────
+// ── Fetcher ──────────────────────────────────────────────────────────
 fetcher fetch (
     .clk         (clk),
     .rst         (rst),
     .core_en     (fetcher_en),
-    .pc_value    (pc_shared),
+    .pc_value    (pc_out[0]),
     .instruction (instruction),
     .done        (done),
     .req_valid   (prog_mem_req_valid),
@@ -112,13 +115,15 @@ decoder dec (
     .rs3_addr     (rs3_addr),
     .imm          (imm),
     .nzp_mask     (nzp_mask),
+    .sync_offset  (sync_offset),
     .branch_offset(branch_offset),
     .ret          (ret),
     .write_back_en(write_back_en_dec),
     .mem_read_en  (mem_read_en),
     .mem_write_en (mem_write_en),
     .branch_en    (branch_en),
-    .nzp_en       (nzp_en)
+    .nzp_en       (nzp_en),
+    .sync_en      (sync_en)
 );
 
 // ── Per-thread generate: ALU, LSU, Register File ─────────────────────────────
@@ -169,7 +174,7 @@ generate
             .r_addr2  (rs2_addr),
             .r_addr3  (mem_write_en ? rd_addr : rs3_addr),
             .w_data   (write_data[i]),
-            .w_en     (write_back_en_sched),
+            .w_en     (write_back_en_sched & active_mask[i]),
             .threadIdx(32'(i)),
             .blockIdx (blockIdx),
             .blockDim (blockDim),
@@ -177,24 +182,21 @@ generate
             .r_data2  (reg_data2[i]),
             .r_data3  (reg_data3[i])
         );
+
+        pc pc_inst (
+            .clk          (clk),
+            .rst          (rst),
+            .block_rst    (pc_block_rst),
+            .pc_en        (pc_en),
+            .branch_en    (branch_en),
+            .branch_offset(branch_offset),
+            .nzp_en       (nzp_en),
+            .nzp_flag     (nzp_result[i]),   // each thread uses its own NZP
+            .nzp_mask     (nzp_mask),
+            .pc_out       (pc_out[i])
+        );
     end
 endgenerate
-
-// ── Shared PC instance ───────────────────────────────────────────────────────
-// block_rst resets PC to 0 when a new block is dispatched.
-// nzp_result[0] is thread 0's flag — representative for SIMD lockstep.
-pc pc_inst (
-    .clk          (clk),
-    .rst          (rst),
-    .block_rst    (pc_block_rst),
-    .pc_en        (pc_en),
-    .branch_en    (branch_en),
-    .branch_offset(branch_offset),
-    .nzp_en       (nzp_en),
-    .nzp_flag     (nzp_result[0]),
-    .nzp_mask     (nzp_mask),
-    .pc_out       (pc_shared)
-);
 
 // ── thread_keep_alive: XOR reduction across all thread write_data ────────────
 genvar k;

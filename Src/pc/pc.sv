@@ -5,7 +5,7 @@
                                // connect to: (scheduler_state==IDLE) && core_start
     input logic pc_en,
     input logic branch_en,
-    input logic [22:0] branch_offset,
+    input logic [11:0] branch_offset,
     input logic nzp_en,
     input logic [2:0] nzp_flag,
     input logic [2:0] nzp_mask,
