@@ -16,5 +16,5 @@ results.xml
 # Generated training/test output
 assembler/builds/weights.json
 
-# Generated hex files
-assembler/builds/*.hex
+# Generated build files
+assembler/builds/
