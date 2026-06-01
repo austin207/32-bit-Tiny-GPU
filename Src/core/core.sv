@@ -30,6 +30,17 @@ module core #(
     input  logic [31:0] data_mem_resp_data [THREADS_PER_CORE-1:0]
 );
 
+logic divergence_detected;
+logic [THREADS_PER_CORE-1:0] taken_mask;
+
+always_comb begin
+    for (int i = 0; i < THREADS_PER_CORE; i++) begin
+        taken_mask[i] = branch_en & ((nzp_result[i] & nzp_mask) != 3'b000) & active_mask[i];
+    end
+
+    divergence_detected = branch_en & (taken_mask != active_mask) & (taken_mask != '0);
+end
+
 // ── Scheduler outputs ────────────────────────────────────────────────────────
 logic fetcher_en, lsu_en, execute_en, write_back_en_sched, pc_en;
 logic [2:0] current_state;
@@ -52,7 +63,9 @@ logic ret, write_back_en_dec, mem_read_en, mem_write_en, branch_en, nzp_en, sync
 // ── Per-thread arrays ────────────────────────────────────────────────────────
 (* syn_keep=1 *) logic [31:0] alu_result    [THREADS_PER_CORE-1:0];
 (* syn_keep=1 *) logic [2:0]  nzp_result    [THREADS_PER_CORE-1:0];
+                 logic [THREADS_PER_CORE-1:0] lsu_done_raw;
                  logic [THREADS_PER_CORE-1:0] lsu_done;
+                 assign lsu_done = lsu_done_raw | ~active_mask;
 (* syn_keep=1 *) logic [31:0] lsu_read_data [THREADS_PER_CORE-1:0];
 (* syn_keep=1 *) logic [31:0] reg_data1     [THREADS_PER_CORE-1:0];
 (* syn_keep=1 *) logic [31:0] reg_data2     [THREADS_PER_CORE-1:0];
@@ -62,7 +75,6 @@ logic ret, write_back_en_dec, mem_read_en, mem_write_en, branch_en, nzp_en, sync
 // Shared PC — single instance for all threads (SIMD).
 logic [31:0] pc_out [THREADS_PER_CORE-1:0];
 logic [THREADS_PER_CORE-1:0] active_mask;
-assign active_mask = {THREADS_PER_CORE{1'b1}}; 
 
 // pc_block_rst: resets PC to 0 at the start of each new block.
 // Fires when scheduler is in IDLE (3'b000) and core_start pulses (IDLE→FETCH).
@@ -88,15 +100,31 @@ scheduler #(
     .write_back_en(write_back_en_sched),
     .current_state(current_state),
     .block_done   (block_done),
-    .pc_en        (pc_en)
+    .pc_en        (pc_en),
+    .divergence_detected(divergence_detected),
+    .taken_mask(taken_mask),
+    .active_mask(active_mask),
+    .sync_en(sync_en),
+    .saved_mask({THREADS_PER_CORE{1'b1}})
 );
+
+logic [31:0] active_pc;
+
+always_comb begin
+    active_pc = pc_out[0];
+    for (int i = THREADS_PER_CORE-1; i >= 0; i--) begin
+        if (active_mask[i]) begin
+            active_pc = pc_out[i];
+        end
+    end
+end
 
 // ── Fetcher ──────────────────────────────────────────────────────────
 fetcher fetch (
     .clk         (clk),
     .rst         (rst),
     .core_en     (fetcher_en),
-    .pc_value    (pc_out[0]),
+    .pc_value    (active_pc),
     .instruction (instruction),
     .done        (done),
     .req_valid   (prog_mem_req_valid),
@@ -151,7 +179,7 @@ generate
         lsu lsu_inst (
             .clk              (clk),
             .rst              (rst),
-            .core_en          (lsu_en),
+            .core_en          (lsu_en & active_mask[i]),
             .mem_read_en      (mem_read_en),
             .mem_write_en     (mem_write_en),
             .mem_data_address (mem_addr[i]),
@@ -162,7 +190,7 @@ generate
             .write_data       (data_mem_req_data[i]),
             .resp_valid       (data_mem_resp_valid[i]),
             .resp_data        (data_mem_resp_data[i]),
-            .done             (lsu_done[i]),
+            .done             (lsu_done_raw[i]),
             .mem_read_data    (lsu_read_data[i])
         );
 

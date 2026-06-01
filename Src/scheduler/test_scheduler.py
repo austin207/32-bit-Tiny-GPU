@@ -139,3 +139,60 @@ async def test_scheduler_ret_instruction(dut):
         await RisingEdge(dut.clk)
     await Timer(1, unit="ns")
     assert dut.current_state.value == 0b000, f"Expected to return to IDLE state, got {dut.current_state.value}"
+
+@cocotb.test()
+async def test_scheduler_divergence(dut):
+    clock = Clock(dut.clk, 10, unit="ns")
+    cocotb.start_soon(clock.start())
+
+    dut.rst.value = 1
+    dut.core_start.value = 0
+    dut.fetcher_done.value = 0
+    dut.lsu_done.value = 0b1111
+    dut.mem_read_en.value = 0
+    dut.mem_write_en.value = 0
+    dut.ret.value = 0
+    dut.divergence_detected.value = 0
+    dut.taken_mask.value = 0b0000
+    dut.sync_en.value = 0
+    dut.saved_mask.value = 0b1111
+    await RisingEdge(dut.clk)
+    await RisingEdge(dut.clk)
+    dut.rst.value = 0
+
+    dut.core_start.value = 1
+    await RisingEdge(dut.clk)
+    dut.core_start.value = 0
+
+    await RisingEdge(dut.clk)
+    dut.fetcher_done.value = 1
+    await RisingEdge(dut.clk)
+    dut.fetcher_done.value = 0
+
+    dut.divergence_detected.value = 1
+    dut.taken_mask.value = 0b1010
+
+    # Wait until UPDATE has fired — state becomes DIVERGE
+    # At this exact moment: pc_en=1 and write_back_en=1 are still high
+    # because DIVERGE state hasn't fired yet to reset them
+    for _ in range(20):
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
+        if dut.current_state.value == 0b111:
+            break
+
+    assert dut.current_state.value == 0b111, \
+        f"Expected DIVERGE (111), got {dut.current_state.value}"
+    assert dut.write_back_en.value == 1, \
+        f"Expected write_back_en=1, got {dut.write_back_en.value}"
+    assert dut.pc_en.value == 1, \
+        f"Expected pc_en=1 in divergence path, got {dut.pc_en.value}"
+
+    # Clock through DIVERGE — active_mask latches taken_mask, goes to FETCH
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    assert dut.active_mask.value == 0b1010, \
+        f"Expected active_mask=1010 after DIVERGE, got {dut.active_mask.value}"
+    assert dut.current_state.value == 0b001, \
+        f"Expected FETCH after DIVERGE, got {dut.current_state.value}"

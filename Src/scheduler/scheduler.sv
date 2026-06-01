@@ -12,12 +12,17 @@ module scheduler #(
     input logic mem_read_en,
     input logic mem_write_en,
     input logic ret,
+    input logic divergence_detected,
+    input logic [THREADS_PER_CORE-1:0] taken_mask,
+    input logic sync_en,
+    input logic [THREADS_PER_CORE-1:0] saved_mask,
 
     output logic fetcher_en,
     output logic lsu_en,
     output logic execute_en,
     output logic write_back_en,
     output logic [2:0] current_state,
+    output logic [THREADS_PER_CORE-1:0] active_mask,
     output logic block_done,
     output logic pc_en
 );
@@ -29,7 +34,8 @@ typedef enum logic [2:0] {
     REQUEST = 3'b011,
     WAIT    = 3'b100,
     EXECUTE = 3'b101,
-    UPDATE  = 3'b110
+    UPDATE  = 3'b110,
+    DIVERGE = 3'b111
  } state_t;
 
 state_t state;
@@ -47,6 +53,7 @@ always_ff @( posedge clk or posedge rst ) begin
         write_back_en <= 0;
         block_done <= 0;
         pc_en <= 0;
+        active_mask <= '1;
     end else begin
         fetcher_en <= 0;
         lsu_en <= 0;
@@ -58,6 +65,7 @@ always_ff @( posedge clk or posedge rst ) begin
            IDLE: begin
                 if (core_start) begin
                     fetcher_en <= 1;
+                    active_mask <= '1;
                     state <= FETCH;
                 end
             end
@@ -92,11 +100,18 @@ always_ff @( posedge clk or posedge rst ) begin
                 if (ret) begin
                     block_done <= 1;
                     state <= IDLE;
+                end else if (divergence_detected) begin
+                    state <= DIVERGE;
+                    pc_en <= 1;
                 end else begin
                     state <= FETCH;
                     pc_en <= 1;
                 end
                 write_back_en <= 1;
+            end
+            DIVERGE: begin
+                active_mask <= taken_mask;
+                state <= FETCH;
             end
             default: ;
         endcase
