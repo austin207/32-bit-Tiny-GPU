@@ -119,6 +119,9 @@ always_comb begin
     end
 end
 
+logic [31:0] sync_pc;
+assign sync_pc = active_pc + {21'b0, sync_offset};
+
 // ── Fetcher ──────────────────────────────────────────────────────────
 fetcher fetch (
     .clk         (clk),

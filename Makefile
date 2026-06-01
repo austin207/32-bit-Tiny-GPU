@@ -12,6 +12,7 @@ TEST_DIRS := \
 	Src/core \
 	Src/dispatcher \
 	Src/device_control_register \
+	Src/warp_stack \
 	Src/Top_level_GPU
 
 .PHONY: test clean assembler infer
