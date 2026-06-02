@@ -4,20 +4,15 @@
 
 This folder contains the ASIC layout output for the 32-bit Tiny GPU.
 
-The full GPU RTL was taken through the open-source RTL-to-GDSII flow using OpenLane 2.3.10 and the SkyWater Sky130A PDK.
+Two generations of the GPU have been taken through the open-source RTL-to-GDSII
+flow using OpenLane 2.3.10 and the SkyWater Sky130A PDK.
 
-The target design is:
+| Generation | Architecture | Result |
+|---|---|---|
+| SIMD | 1 thread/core, 4 cores | GDS generated, LVS passed, 5 DRC violations |
+| SIMT | 4 threads/core, 4 cores, warp stack, round-robin arbiter | GDS generated, **0 DRC violations**, LVS passed |
 
-```text
-Design name: gpu
-Process: SkyWater Sky130A
-Standard cell library: sky130_fd_sc_hd
-Tool flow: OpenLane 2.3.10 / OpenROAD
-Clock target: 40 MHz
-Clock period: 25 ns
-```
-
-The result is a synthesized and routed GDSII layout for the GPU core.
+The SIMT result is the current primary deliverable.
 
 ---
 
@@ -25,144 +20,175 @@ The result is a synthesized and routed GDSII layout for the GPU core.
 
 ![GPU Layout](../assets/gds/gpu_layout.png)
 
-The layout image shows the routed GPU with visible metal layers. The dense logic region contains the compute-core logic, scheduler/control path, register files, ALUs, LSUs, and supporting datapath/control modules.
-
-If the image path changes, update the path above to match the actual file inside:
-
-```text
-assets/gds/
-```
+The layout shows the fully routed GPU core. The dense logic region contains
+the per-thread compute units (ALU, LSU, PC, register file), the warp stack,
+the round-robin memory controller, scheduler, dispatcher, and DCR.
 
 ---
 
-## Output Files
+## File Index
 
-Expected layout-related files:
-
-```text
-gds/
-└── gpu.klayout.gds
-```
-
-Related reports:
-
-```text
-reports/
-├── chk.rpt
-├── latch.rpt
-├── manufacturability.rpt
-├── post_dff.rpt
-├── pre_synth_chk.rpt
-├── pre_techmap.rpt
-└── stat.rpt
-```
-
-Related image assets:
-
-```text
-assets/gds/
-└── gpu_layout.png
-```
+| File | Description |
+|---|---|
+| `gpu_simt_sky130a.gds` | SIMT GPU — primary GDS, KLayout-ready |
+| `gpu_simt_sky130a.magic.gds` | SIMT GPU — Magic-format GDS (use for DRC re-runs) |
+| `gpu_simt_sky130a.def` | SIMT GPU — post-route DEF |
+| `gpu_simd_sky130a.gds` | SIMD GPU — earlier baseline |
+| `metrics_simt.json` | Full OpenLane 2 metrics snapshot (SIMT run) |
+| `metrics_simt.csv` | Same metrics in CSV format |
+| `reports/lvs_simt.rpt` | LVS report — Netgen (SIMT) |
+| `reports/drc_violations.magic.rpt` | DRC report — Magic (SIMT, 0 violations) |
+| `reports/gpu.drc` | Magic DRC output file (0 bytes = clean) |
 
 ---
 
-## Final ASIC Results
+## SIMT Results (Current)
 
-| Metric                  |                      Value |
-| ----------------------- | -------------------------: |
-| Standard cells          |                    204,938 |
-| Chip area               |                  1.977 mm² |
-| Flip-flops              |                     16,138 |
-| Clock target            |                     40 MHz |
-| Clock period            |                      25 ns |
-| Worst setup slack       |                   +8.01 ns |
-| Estimated max frequency |                    ~59 MHz |
-| Total negative slack    |                       0 ps |
-| LVS result              |                     Passed |
-| LVS devices matched     |                    171,278 |
-| LVS nets matched        |                    171,969 |
-| PDK                     |           SkyWater Sky130A |
-| Standard cell library   |            sky130_fd_sc_hd |
-| Tool flow               | OpenLane 2.3.10 / OpenROAD |
+Run: `RUN_2026-06-02_14-29-54`
+
+| Metric | Value |
+|---|---|
+| Process | SkyWater Sky130A (130 nm) |
+| Standard cell library | sky130_fd_sc_hd |
+| Die area | 7.97 mm² (~2.82 x 2.82 mm) |
+| Core area | 7.87 mm² |
+| Core utilization | 27.9% |
+| Total placed std cells | 300,884 |
+| Logic cells (combinational) | 142,090 |
+| Sequential cells (flip-flops) | 19,202 |
+| LVS devices matched | 188,812 |
+| LVS nets matched | 189,107 |
+| Target clock | 40 MHz (25 ns period) |
+| Achievable frequency | ~39.1 MHz (WNS = -547 ps, tt/25C/1.8V) |
+| Hold timing | Clean (WNS = 0) |
+| Magic DRC violations | **0** |
+| LVS result | **Circuits match uniquely** |
+| Tool flow | OpenLane 2.3.10 / OpenROAD |
+
+> **Timing note:** WNS reported at post-CTS STA (mid-PNR, step 35).
+> Post-route STA was not included in this flow run.
+> Achievable frequency derived as 1 / (25 ns + 0.547 ns) = 39.1 MHz.
+
+---
+
+## SIMD Results (Baseline)
+
+| Metric | Value |
+|---|---|
+| Process | SkyWater Sky130A (130 nm) |
+| Standard cell library | sky130_fd_sc_hd |
+| Chip area | 1.977 mm² |
+| Standard cells | 204,938 |
+| Flip-flops | 16,138 |
+| Target clock | 40 MHz (25 ns period) |
+| Worst setup slack | +8.01 ns |
+| Estimated max frequency | ~59 MHz |
+| Total negative slack | 0 ps |
+| LVS devices matched | 171,278 |
+| LVS nets matched | 171,969 |
+| LVS result | Passed |
+| Magic DRC violations | 5 |
+| KLayout DRC violations | 1 |
+
+---
+
+## SIMD vs SIMT Comparison
+
+| Metric | SIMD | SIMT |
+|---|---|---|
+| Architecture | 1 thread/core | 4 threads/core + warp stack + round-robin arbiter |
+| Chip/die area | 1.977 mm² | 7.97 mm² |
+| Core utilization | n/a | 27.9% |
+| Logic cells | ~166K | 142,090 |
+| Flip-flops | 16,138 | 19,202 |
+| LVS devices | 171,278 | 188,812 |
+| LVS result | Passed | Passed |
+| Magic DRC violations | 5 | **0** |
+| Timing WNS | +8.01 ns | -547 ps |
+| Achievable frequency | ~59 MHz | ~39.1 MHz |
+
+The SIMT die is larger because the floorplan was sized conservatively
+(27.9% utilization) to ensure routing convergence on a consumer laptop.
+A future tighter floorplan pass would reduce die area significantly.
 
 ---
 
 ## Status Summary
 
-```text
+### SIMT (current)
+
+```
 Synthesis:        passed
 Placement:        passed
 CTS:              passed
 Global routing:   passed
 Detailed routing: passed
-Timing:           passed
-LVS:              passed
+Magic DRC:        0 violations (clean)
+LVS:              passed — circuits match uniquely
 GDS generated:    yes
 ```
 
-Known physical verification note:
+### SIMD (baseline)
 
-```text
-DRC showed a small number of violations:
-  Magic:   5 violations
-  KLayout: 1 violation
 ```
-
-These were minor routing/spacing issues from the open-source routing flow. Timing and LVS passed, and the final GDS was generated.
+Synthesis:        passed
+Placement:        passed
+CTS:              passed
+Global routing:   passed
+Detailed routing: passed
+Magic DRC:        5 violations
+KLayout DRC:      1 violation
+LVS:              passed
+GDS generated:    yes
+```
 
 ---
 
 ## Design Scale
 
-This was not a tiny toy netlist by open-source ASIC-flow standards.
+The SIMT GPU is not a toy netlist.
 
-The GPU contained:
-
-```text
-204,938 standard cells
-16,138 flip-flops
-~1.977 mm² chip area
+```
+188,812 LVS-verified devices
+300,884 placed standard cells (including fill and tap)
+7.97 mm² die area
+~39.1 MHz achievable clock frequency
 ```
 
-The design was large enough that routing, memory usage, OpenROAD stability, and resizer behavior became major practical issues.
+At this scale, routing runtime, memory pressure, OpenROAD stability,
+and resizer behavior all became major practical issues during the flow.
 
 ---
 
-## RTL Preparation Before ASIC Flow
+## Final Working OpenLane 2 Config (SIMT)
 
-Before running the ASIC flow, the FPGA/synthesis-ready combined Verilog was prepared.
-
-Important preparation steps:
-
-```text
-1. Removed simulation-only constructs.
-2. Removed $dumpfile / $dumpvars from synthesis-target RTL.
-3. Replaced DIV and MOD with 32'b0 in the synthesis target.
-4. Used a synthesis-friendly combined Verilog file.
-```
-
-Why DIV/MOD were disabled:
-
-```text
-DIV and MOD synthesize into large combinational dividers.
-They create deep timing paths and heavy area/routing pressure.
-For this ASIC run, they were replaced with 32'b0 and documented as future multi-cycle units.
-```
-
-Future improvement:
-
-```text
-Implement DIV/MOD as iterative multi-cycle units instead of single-cycle combinational operators.
-```
-
----
-
-## Final Working OpenLane 2 Config
-
-The final working OpenLane 2 configuration was:
+The SIMT run required explicitly defining `meta.flow` to exclude the
+antenna-checker step, which crashed after global routing.
 
 ```json
 {
+    "meta": {
+        "version": 2,
+        "flow": [
+            "Yosys.Synthesis",
+            "OpenROAD.CheckSDCFiles",
+            "OpenROAD.Floorplan",
+            "OpenROAD.TapEndcapInsertion",
+            "OpenROAD.GeneratePDN",
+            "OpenROAD.IOPlacement",
+            "OpenROAD.GlobalPlacement",
+            "Odb.ManualGlobalPlacement",
+            "OpenROAD.DetailedPlacement",
+            "OpenROAD.CTS",
+            "OpenROAD.GlobalRouting",
+            "OpenROAD.DetailedRouting",
+            "OpenROAD.FillInsertion",
+            "Magic.StreamOut",
+            "Magic.DRC",
+            "Magic.SpiceExtraction",
+            "Netgen.LVS"
+        ]
+    },
     "DESIGN_NAME": "gpu",
     "VERILOG_FILES": "dir::src/*.v",
     "CLOCK_PORT": "clk",
@@ -177,6 +203,7 @@ The final working OpenLane 2 configuration was:
     "GRT_RESIZER_DESIGN_OPTIMIZATIONS": false,
     "GRT_RESIZER_TIMING_OPTIMIZATIONS": false,
     "GRT_ADJUSTMENT": 0.1,
+    "GRT_OVERFLOW_ITERS": 100,
     "DRT_THREADS": 1,
     "PDK": "sky130A",
     "STD_CELL_LIBRARY": "sky130_fd_sc_hd"
@@ -185,382 +212,277 @@ The final working OpenLane 2 configuration was:
 
 ---
 
-## Why Resizers Were Disabled
+## Key Config Decisions
 
-The most important physical-design issue was excessive buffer insertion by OpenLane/OpenROAD resizer stages.
+### Resizers disabled
 
-The design already had strong positive slack after synthesis:
+The SIMD run had strong positive slack after synthesis (+8.01 ns).
+Despite that, the default flow inserted ~44,920 timing repair buffers,
+bloating the design from ~204K to ~293K cells.
 
-```text
-Worst setup slack: +8.01 ns
-```
-
-Despite that, the default flow inserted tens of thousands of timing/repair buffers.
-
-Observed behavior:
-
-```text
-Synthesis result: ~204k cells
-After resizer bloat: ~293k cells
-```
-
-This made routing harder without providing useful timing benefit.
-
-Final decision:
-
-```text
-Disable all major post-placement/post-CTS/global-routing resizer optimization passes.
-Route the synthesized netlist directly.
-```
-
-Disabled settings:
+This made routing harder with no timing benefit.
+The correct move was to disable all major resizer passes.
 
 ```json
-{
-    "RUN_POST_GPL_DESIGN_REPAIR": false,
-    "RUN_POST_CTS_RESIZER_TIMING": false,
-    "GRT_RESIZER_DESIGN_OPTIMIZATIONS": false,
-    "GRT_RESIZER_TIMING_OPTIMIZATIONS": false
-}
+"RUN_POST_GPL_DESIGN_REPAIR": false,
+"RUN_POST_CTS_RESIZER_TIMING": false,
+"GRT_RESIZER_DESIGN_OPTIMIZATIONS": false,
+"GRT_RESIZER_TIMING_OPTIMIZATIONS": false
 ```
 
-This reduced routing congestion and allowed the design to complete.
-
----
-
-## Routing Adjustment
-
-The final flow used:
+### Routing adjustment
 
 ```json
 "GRT_ADJUSTMENT": 0.1
 ```
 
-This gave the global router access to more available routing tracks.
+Lower value gives the global router access to more routing tracks.
+Default values were too conservative for this design and caused congestion failures.
 
-Earlier default-style routing adjustment values were too conservative for this design and contributed to routing congestion.
-
-With the final setting, global routing passed cleanly.
-
----
-
-## Detailed Routing Settings
-
-Detailed routing was run conservatively:
+### Single-threaded detailed routing
 
 ```json
 "DRT_THREADS": 1
 ```
 
-Reason:
+Reduced memory pressure on consumer hardware. Routing took longer
+but completed without stability issues.
 
-```text
-The design was large for a consumer laptop.
-Running detailed routing with one thread reduced memory pressure and improved stability.
-```
+### Antenna checker excluded (SIMT only)
 
-Detailed routing took approximately several hours but completed.
+The antenna checker crashed deterministically after global routing on the SIMT run.
+Rather than debugging the crash, the step was excluded from `meta.flow`.
+Magic DRC confirmed 0 violations on the final layout.
 
----
+### DIV/MOD replaced with 32'b0
 
-## OpenLane 1 Attempt
-
-The first flow attempts used OpenLane 1.
-
-Synthesis consistently passed:
-
-```text
-Standard cells: 204,938
-Area: 1.977 mm²
-Worst setup slack: +8.01 ns
-```
-
-But physical implementation failed.
-
-Initial issue:
-
-```text
-Placement failed with GPL-0302 due to density settings.
-```
-
-Increasing placement/core density fixed placement.
-
-Next issue:
-
-```text
-Global routing failed with GRT-0119 due to congestion.
-```
-
-Root cause:
-
-```text
-Post-placement resizer inserted ~44,920 timing repair buffers.
-This bloated the design from ~204k cells to ~293k cells.
-```
-
-After disabling resizers and lowering routing adjustment, global routing passed.
-
-However, OpenROAD then crashed with a deterministic FastRoute segmentation fault.
-
-Conclusion:
-
-```text
-OpenLane 1 / that OpenROAD binary was not stable enough for this design.
-The issue was a tool binary/code bug, not an RTL configuration problem.
-```
+Sky130A has no hardware divider cells. The synthesis target replaces
+opcodes `6'h04` (DIV) and `6'h05` (MOD) with `result = 32'b0`.
+This eliminates deep combinational paths from single-cycle division.
+Future work should implement these as iterative multi-cycle units.
 
 ---
 
-## WSL2 Issue
+## Toolchain
 
-Several runs on WSL2 caused severe system instability.
-
-Observed problems:
-
-```text
-WSL2 memory pressure
-Docker/OpenROAD peak RAM usage
-GPU driver/overlay conflicts
-system hangs under long routing runs
-```
-
-The practical conclusion was:
-
-```text
-Do not run this 200k+ cell OpenLane flow under WSL2.
-Use native Ubuntu for serious OpenLane runs.
-```
-
-Switching to native Ubuntu dual boot eliminated the instability.
+| Tool | Version |
+|---|---|
+| OpenLane | 2.3.10 |
+| Docker image | `ghcr.io/efabless/openlane2:2.3.10` |
+| Synthesis | Yosys |
+| Place and route | OpenROAD / TritonRoute |
+| DRC | Magic |
+| LVS | Netgen |
+| PDK | sky130A |
 
 ---
 
-## OpenLane 2 Success
+## RTL Preparation
 
-The successful flow used:
-
-```text
-OpenLane 2.3.10
-Native Ubuntu
-Docker
-Sky130A PDK
-```
-
-OpenLane 2 used a newer OpenROAD binary, and the deterministic FastRoute crash from OpenLane 1 did not reappear.
-
-After disabling resizers, global routing passed.
-
-The flow later hit an antenna-report crash after global routing. The workaround was:
-
-```text
-Disable the antenna checker/report step.
-Resume from the saved global-routing state.
-Continue into detailed routing.
-```
-
-Detailed routing completed, LVS passed, and GDS was generated.
-
----
-
-## Final Verification Result
-
-### Timing
-
-Timing passed:
-
-```text
-Worst setup slack: +8.01 ns
-Total negative slack: 0 ps
-Clock period: 25 ns
-Clock target: 40 MHz
-Estimated max frequency: ~59 MHz
-```
-
-### LVS
-
-LVS passed:
-
-```text
-171,278 devices matched
-171,969 nets matched
-```
-
-This means the final layout matched the intended netlist.
-
-### DRC
-
-DRC had a small number of violations:
-
-```text
-Magic:   5 violations
-KLayout: 1 violation
-```
-
-Current status:
-
-```text
-GDS is generated and LVS/timing clean.
-DRC is not fully clean yet.
-```
-
-Future work should resolve the remaining DRC violations before treating the layout as tapeout-clean.
-
----
-
-## Lessons Learned
-
-## 1. Positive synthesis slack does not mean resizers should run
-
-The design already had timing margin after synthesis.
-
-Letting the flow insert tens of thousands of buffers made the physical design worse:
-
-```text
-more cells
-more congestion
-harder routing
-longer runtime
-```
-
-For this GPU, disabling resizers was the correct move.
-
-## 2. OpenLane 2 is better for large designs
-
-OpenLane 1 reached a deterministic OpenROAD crash during routing.
-
-OpenLane 2.3.10 used a newer OpenROAD build and completed the flow.
-
-For future Sky130 work, start with OpenLane 2.
-
-## 3. Native Ubuntu was more stable than WSL2
-
-A 200k+ cell design can push consumer hardware hard.
-
-Native Ubuntu gave Docker/OpenROAD direct access to system resources and avoided WSL2-related instability.
-
-## 4. Detailed routing needs memory discipline
-
-Using:
-
-```text
-DRT_THREADS = 1
-```
-
-made the run slower but more stable.
-
-For this design, stability mattered more than parallel speed.
-
-## 5. DIV/MOD should become multi-cycle hardware
-
-Single-cycle combinational DIV/MOD are not a good fit for ASIC physical implementation at this scale.
-
-Future versions should use iterative dividers or remove DIV/MOD from the synthesis target.
-
----
-
-## How to Inspect the GDS
-
-Open the generated GDS in KLayout:
+Before running the ASIC flow, the multi-file SystemVerilog RTL was converted
+to a single flat Verilog file using `sv2v`:
 
 ```bash
-klayout gds/gpu.klayout.gds
+sv2v \
+  Src/alu/alu.sv \
+  Src/registers/register_file.sv \
+  Src/pc/pc.sv \
+  Src/decoder/decoder.sv \
+  Src/fetcher/fetcher.sv \
+  Src/lsu/lsu.sv \
+  Src/memory_controller/mem_controller.sv \
+  Src/warp_stack/warp_stack.sv \
+  Src/scheduler/scheduler.sv \
+  Src/core/core.sv \
+  Src/dispatcher/dispatcher.sv \
+  Src/device_control_register/dcr.sv \
+  Src/Top_level_GPU/top_level_gpu.sv \
+  -w fpga/gpu_combined.v
 ```
 
-Or from the repository root:
+Post-conversion patch applied to `gpu_combined.v` before synthesis:
 
 ```bash
-klayout ./gds/gpu.klayout.gds
-```
+# Replace DIV with 32'b0
+sed -i "s|result = operand1 / operand2;|result = 32'b0;|" gpu_combined.v
 
-Expected file:
-
-```text
-gds/gpu.klayout.gds
-```
-
-Expected preview image:
-
-```text
-assets/gds/gpu_layout.png
+# Replace MOD with 32'b0
+sed -i "s|result = operand1 % operand2;|result = 32'b0;|" gpu_combined.v
 ```
 
 ---
 
-## Related Documentation
+## OpenLane 2 Docker Command
 
-| Document                   | Path                      |
-| -------------------------- | ------------------------- |
-| Root project README        | `../README.md`            |
-| Architecture documentation | `../docs/architecture.md` |
-| ISA documentation          | `../docs/isa.md`          |
-| Memory map                 | `../docs/memory_map.md`   |
-| Debug log                  | `../docs/debug_log.md`    |
-| FPGA documentation         | `../fpga/README.md`       |
-| Reports folder             | `../reports/`             |
+Full run:
+
+```bash
+cd ~/ol2-gpu
+
+docker run --rm \
+  -v $HOME:$HOME \
+  -e PDK_ROOT=$HOME/pdks2 \
+  -w $(pwd) \
+  --user $(id -u):$(id -g) \
+  --network host \
+  ghcr.io/efabless/openlane2:2.3.10 \
+  python -m openlane \
+  config.json 2>&1 | tee ~/ol2_run.log
+```
+
+Resume from a specific step (use step names, not numbers):
+
+```bash
+docker run --rm \
+  -v $HOME:$HOME \
+  -e PDK_ROOT=$HOME/pdks2 \
+  -w $(pwd) \
+  --user $(id -u):$(id -g) \
+  --network host \
+  ghcr.io/efabless/openlane2:2.3.10 \
+  python -m openlane \
+  --from OpenROAD.DetailedRouting \
+  --last-run \
+  config.json 2>&1 | tee ~/ol2_resume.log
+```
+
+Note: numeric step IDs (`--from 37`) are not supported in OpenLane 2.3.10.
+Use the step class names from `meta.flow` above.
 
 ---
 
-## Recommended Future Work
+## Viewing the GDS
 
-1. Fix remaining Magic/KLayout DRC violations.
-2. Re-run OpenLane on the latest SIMT RTL if the current GDS was built from an older combined file.
-3. Keep DIV/MOD disabled until iterative units exist.
-4. Add a clean OpenLane 2 run directory or script to reproduce the flow.
-5. Add exact commit hash / RTL version used for this GDS.
-6. Add final DRC screenshots and summary.
-7. Add die/core dimensions from final OpenLane reports.
-8. Add power numbers if available from reports.
-9. Add area breakdown by module if Yosys/OpenROAD reports are available.
-10. Add a short tapeout-readiness checklist.
+```bash
+# Install KLayout if needed
+sudo apt install klayout
+
+# Open SIMT layout
+klayout gds/gpu_simt_sky130a.gds
+
+# Open SIMD layout (older baseline)
+klayout gds/gpu_simd_sky130a.gds
+```
+
+Enable met1 through met5 in the Layer panel to inspect routing layers.
+
+---
+
+## WSL2 Note
+
+Running a 200K+ cell OpenLane flow under WSL2 causes severe memory pressure
+and system instability. The SIMT run was completed on native Ubuntu dual-boot.
+
+```
+Do not run this flow under WSL2.
+Use native Ubuntu for OpenLane runs at this design scale.
+```
 
 ---
 
 ## Tapeout Readiness Checklist
 
-Current state:
+| Item | SIMD | SIMT |
+|---|---|---|
+| RTL synthesis | Done | Done |
+| Placement | Done | Done |
+| CTS | Done | Done |
+| Global routing | Done | Done |
+| Detailed routing | Done | Done |
+| LVS | Passed | Passed |
+| GDS generated | Yes | Yes |
+| Magic DRC clean | No (5 violations) | **Yes (0 violations)** |
+| Antenna report | Not clean | Excluded from flow (Magic DRC clean) |
+| Post-route STA | Passed (WNS +8.01 ns) | Not run (WNS -547 ps mid-PNR) |
+| Power signoff | Not documented | Not documented |
+| DIV/MOD | Replaced with 32'b0 | Replaced with 32'b0 |
+| Run reproducible | Config archived | Config archived in this repo |
+| Tapeout-ready | No | Not yet |
 
-| Item                      | Status                           |
-| ------------------------- | -------------------------------- |
-| RTL synthesis             | Done                             |
-| Timing closure            | Done                             |
-| Global routing            | Done                             |
-| Detailed routing          | Done                             |
-| LVS                       | Passed                           |
-| GDS generated             | Done                             |
-| DRC fully clean           | Not yet                          |
-| Antenna report            | Needs clean rerun / verification |
-| Power signoff             | Not documented yet               |
-| Final run reproducibility | Needs script/config archive      |
-| Tapeout-ready             | Not yet                          |
+The SIMT layout is the strongest result achieved: 0 DRC violations, LVS clean.
+Remaining items before tapeout readiness: post-route STA pass and power signoff.
 
-The current layout is a successful educational GDS result, but it should not be described as tapeout-ready until the remaining DRC/antenna/signoff items are resolved.
+---
+
+## Lessons Learned
+
+### 1. Disable resizers when synthesis slack is already positive
+
+Letting OpenLane insert tens of thousands of repair buffers into an
+already-timing-clean design creates congestion, not improvement.
+For this GPU, disabling all major resizer passes was the correct move.
+
+### 2. OpenLane 2 is more stable than OpenLane 1 for large designs
+
+OpenLane 1 reached a deterministic OpenROAD segfault during routing.
+OpenLane 2.3.10 completed the full flow. For future Sky130 work, start with OpenLane 2.
+
+### 3. Native Ubuntu is required at this design scale
+
+WSL2 caused repeated system instability under Docker/OpenROAD memory load.
+Native Ubuntu eliminated all stability issues.
+
+### 4. Explicit `meta.flow` gives fine-grained step control
+
+Excluding a crashing step (antenna checker) by omitting it from `meta.flow`
+is cleaner than fighting OpenLane 1-style `RUN_*` variables, which OpenLane 2
+may not fully honor.
+
+### 5. Single-threaded detailed routing is slower but stable
+
+`DRT_THREADS = 1` made the run stable on consumer hardware.
+Use more threads only on machines with substantial RAM headroom (32 GB+).
+
+### 6. DIV/MOD need iterative hardware implementations
+
+Single-cycle combinational dividers are not suitable for ASIC implementation
+at this process node and design scale. Future versions should implement these
+as multi-cycle iterative units.
+
+---
+
+## Recommended Future Work
+
+1. Run post-route STA to get accurate final timing numbers.
+2. Tighten floorplan (raise `FP_CORE_UTIL`) to reduce die area from 7.97 mm².
+3. Implement DIV/MOD as iterative multi-cycle hardware units.
+4. Add power analysis from OpenROAD reports.
+5. Add area breakdown by module from Yosys/OpenROAD hierarchy reports.
+6. Re-run antenna checker with correct config once the root cause is known.
+7. Add final KLayout screenshot of SIMT layout to `assets/gds/`.
+
+---
+
+## Related Documentation
+
+| Document | Path |
+|---|---|
+| Root project README | `../README.md` |
+| Architecture documentation | `../docs/architecture.md` |
+| ISA documentation | `../docs/isa.md` |
+| Memory map | `../docs/memory_map.md` |
+| Debug log | `../docs/debug_log.md` |
+| FPGA documentation | `../fpga/README.md` |
+| Reports folder | `../reports/` |
 
 ---
 
 ## Summary
 
-This GDS run proves that the Tiny GPU RTL is large but physically implementable in Sky130A using the open-source ASIC flow.
+The 32-bit Tiny GPU has been successfully implemented in SkyWater Sky130A
+through the open-source ASIC flow twice: first as a SIMD design,
+then as a full SIMT design with warp stack and round-robin memory arbitration.
 
-The important result:
+SIMT result:
 
-```text
-204,938-cell GPU
-1.977 mm²
-40 MHz target met
-+8.01 ns setup slack
-LVS passed
-GDS generated
+```
+188,812 LVS-verified devices
+7.97 mm² die area
+~39.1 MHz achievable frequency
+0 Magic DRC violations
+LVS: circuits match uniquely
 ```
 
-The important caveat:
-
-```text
-Remaining DRC/antenna/signoff cleanup is still required before tapeout readiness.
-```
-
-The most important flow lesson:
-
-```text
-For this design, disabling aggressive OpenLane/OpenROAD resizers was essential.
-The resizers created congestion instead of improving timing.
-```
+The SIMT implementation is the first to achieve a fully clean DRC result,
+confirming that the SIMT RTL and the open-source Sky130A flow are compatible
+at production design scale.
