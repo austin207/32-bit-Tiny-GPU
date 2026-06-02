@@ -24,8 +24,7 @@ async def test_core_basic(dut):
     dut.prog_mem_resp_valid.value = 0
     dut.prog_mem_resp_data.value = 0
     dut.data_mem_resp_valid.value = 0
-    for i in range(4):
-        dut.data_mem_resp_data[i].value = 0
+    dut.data_mem_resp_data.value  = 0
 
     # Reset
     dut.rst.value = 1

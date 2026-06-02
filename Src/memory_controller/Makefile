@@ -1,6 +1,6 @@
 TOPLEVEL_LANG = verilog
 VERILOG_SOURCES = $(shell pwd)/mem_controller.sv
-TOPLEVEL = memory_controller
+TOPLEVEL = mem_controller
 COCOTB_TEST_MODULES = test_mem_controller
 SIM = icarus
 export PYTHONPATH := $(shell pwd):$(PYTHONPATH)

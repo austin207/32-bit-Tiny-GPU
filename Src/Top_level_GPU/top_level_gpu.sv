@@ -11,9 +11,6 @@ module gpu #(
     input  logic [31:0] dcr_data,
     output logic        kernel_done,
 
-    // thread_keep_alive: XOR of all thread write_data across all cores.
-    // Connect to an LED or primary output in the FPGA wrapper to prevent
-    // synthesis tools from sweeping thread logic as dead code.
     output logic [31:0] thread_keep_alive,
 
     output logic [NUM_CORES-1:0]       prog_mem_req_valid,
@@ -21,12 +18,12 @@ module gpu #(
     input  logic [NUM_CORES-1:0]       prog_mem_resp_valid,
     input  logic [31:0]                prog_mem_resp_data [NUM_CORES-1:0],
 
-    output logic [TOTAL_THREADS-1:0]   data_mem_req_valid,
-    output logic [31:0]                data_mem_req_addr  [TOTAL_THREADS-1:0],
-    output logic [TOTAL_THREADS-1:0]   data_mem_req_rw,
-    output logic [31:0]                data_mem_req_data  [TOTAL_THREADS-1:0],
-    input  logic [TOTAL_THREADS-1:0]   data_mem_resp_valid,
-    input  logic [31:0]                data_mem_resp_data [TOTAL_THREADS-1:0]
+    output logic [NUM_CORES-1:0]   data_mem_req_valid,
+    output logic [31:0]                data_mem_req_addr  [NUM_CORES-1:0],
+    output logic [NUM_CORES-1:0]   data_mem_req_rw,
+    output logic [31:0]                data_mem_req_data  [NUM_CORES-1:0],
+    input  logic [NUM_CORES-1:0]   data_mem_resp_valid,
+    input  logic [NUM_CORES-1:0][31:0] data_mem_resp_data
 );
 
 // ── DCR / Dispatcher wires ───────────────────────────────────────────────────
@@ -70,31 +67,17 @@ genvar i;
 
 generate
     for (i = 0; i < NUM_CORES; i = i + 1) begin : core_gen
-
-        // Intermediate wires for unpacked array slicing
-        // (Icarus VPI does not support unpacked array part-selects directly)
-        logic [THREADS_PER_CORE-1:0] core_data_req_valid;
-        logic [31:0]                 core_data_req_addr [THREADS_PER_CORE-1:0];
-        logic [THREADS_PER_CORE-1:0] core_data_req_rw;
-        logic [31:0]                 core_data_req_data [THREADS_PER_CORE-1:0];
-        logic [THREADS_PER_CORE-1:0] core_data_resp_valid;
-        logic [31:0]                 core_data_resp_data [THREADS_PER_CORE-1:0];
+        logic [31:0] data_mem_req_addr_wire;
+        logic [31:0] data_mem_req_data_wire;
+        logic [31:0] data_mem_resp_data_wire;
         logic [31:0]                 prog_mem_req_addr_wire;
         logic [31:0]                 prog_mem_resp_data_wire;
 
         assign prog_mem_req_addr[i]    = prog_mem_req_addr_wire;
         assign prog_mem_resp_data_wire = prog_mem_resp_data[i];
-
-        // Fan data memory channels to/from top-level flat arrays
-        genvar j;
-        for (j = 0; j < THREADS_PER_CORE; j++) begin : thread_wire_gen
-            assign data_mem_req_valid [i*THREADS_PER_CORE+j] = core_data_req_valid[j];
-            assign data_mem_req_addr  [i*THREADS_PER_CORE+j] = core_data_req_addr[j];
-            assign data_mem_req_rw    [i*THREADS_PER_CORE+j] = core_data_req_rw[j];
-            assign data_mem_req_data  [i*THREADS_PER_CORE+j] = core_data_req_data[j];
-            assign core_data_resp_valid[j] = data_mem_resp_valid[i*THREADS_PER_CORE+j];
-            assign core_data_resp_data [j] = data_mem_resp_data [i*THREADS_PER_CORE+j];
-        end
+        assign data_mem_req_addr[i]    = data_mem_req_addr_wire;
+        assign data_mem_req_data[i]    = data_mem_req_data_wire;
+        assign data_mem_resp_data_wire = data_mem_resp_data[i];
 
         core #(.THREADS_PER_CORE(THREADS_PER_CORE)) core_inst (
             .clk                (clk),
@@ -108,12 +91,12 @@ generate
             .prog_mem_req_addr  (prog_mem_req_addr_wire),
             .prog_mem_resp_valid(prog_mem_resp_valid[i]),
             .prog_mem_resp_data (prog_mem_resp_data_wire),
-            .data_mem_req_valid (core_data_req_valid),
-            .data_mem_req_addr  (core_data_req_addr),
-            .data_mem_req_rw    (core_data_req_rw),
-            .data_mem_req_data  (core_data_req_data),
-            .data_mem_resp_valid(core_data_resp_valid),
-            .data_mem_resp_data (core_data_resp_data)
+            .data_mem_req_valid (data_mem_req_valid[i]),
+            .data_mem_req_addr  (data_mem_req_addr_wire),
+            .data_mem_req_rw    (data_mem_req_rw[i]),
+            .data_mem_req_data  (data_mem_req_data_wire),
+            .data_mem_resp_valid(data_mem_resp_valid[i]),
+            .data_mem_resp_data (data_mem_resp_data_wire)
         );
     end
 endgenerate
