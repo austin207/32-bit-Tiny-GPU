@@ -992,8 +992,8 @@ endmodule
 			6'h01: result = operand1 + operand2;
 			6'h02: result = operand1 - operand2;
 			6'h03: result = operand1 * operand2;
-			6'h04: result = operand1 / operand2;
-			6'h05: result = operand1 % operand2;
+			6'h04: result = 32'b0;
+			6'h05: result = 32'b0;
 			6'h06: result = operand1 << operand2;
 			6'h07: result = operand1 >> operand2;
 			6'h08: result = operand1 & operand2;
