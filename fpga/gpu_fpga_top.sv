@@ -1,4 +1,4 @@
-// gpu_fpga_top.sv — Tang Nano 20K wrapper for 32-bit Tiny GPU
+// gpu_fpga_top.sv — Tang Nano 20K wrapper for 32-bit SIMT GPU
 //
 // Clock:
 //   clk      = 27 MHz onboard oscillator (pin 4, LVCMOS33)
@@ -6,51 +6,56 @@
 //   UART TX runs on fast clk (27 MHz) for accurate 115200 baud
 //
 // Configuration:
-//   THREADS_PER_CORE = 1, NUM_BLOCKS = 4
-//   Runs 4 sequential blocks.  In each block r29 returns blockIdx
-//   (patched in registers.sv) so:
-//     block 0 → computes y[0] → stores at BRAM addr 20
-//     block 1 → computes y[1] → stores at BRAM addr 21
-//     block 2 → computes y[2] → stores at BRAM addr 22
-//     block 3 → computes y[3] → stores at BRAM addr 23
+//   NUM_CORES=4, THREADS_PER_CORE=4, num_blocks=1, blockDim=4
+//   Dispatcher assigns the single block to core 0; cores 1-3 stay idle.
+//   Threads 0-3 run SIMT ReLU: if (z > 0) keep, else zero.
+//
+// Memory interface (vs SIMD version):
+//   Prog memory: 4 BRAMs (one per core), packed 128-bit port
+//   Data memory: 4 BRAMs (one per core), packed 128-bit port
+//   mem_controller inside each core serialises 4-thread requests
+//   — wrapper sees one clean req/resp channel per core.
+//
+// Boot sequence:
+//   num_blocks=1, blockDim=4, then single start pulse.
+//   SIMD version needed continuous dispatch_en because it ran
+//   4 sequential blocks through 1 core. SIMT runs 1 block with
+//   4 threads — dispatcher fills it in one cycle, no loop needed.
 //
 // UART output (115200 8N1, pin 69 → BL616 USB-UART bridge):
-//   Open the higher-numbered COM port in any terminal (PuTTY, Tera Term)
-//   at 115200 baud after flashing.  Output:
-//     GPU DONE
-//     T:XXXXXXXX   (clk_slow cycles, 1 cycle = 296 ns)
-//     Y:YYYYYYYY YYYYYYYY YYYYYYYY YYYYYYYY  (Q8 fixed-point hex)
+//   SIMT GPU\r\n
+//   T:XXXXXXXX\r\n        (clk_slow cycles, 1 cycle = 296 ns)
+//   R:YYYYYYYY YYYYYYYY YYYYYYYY YYYYYYYY\r\n  (mem[4..7])
 //
-//   To convert Y to float: value / 256.0
-//   Simulation expected: y≈[0x1F3,0x3E7,0x5DB,0x7CF] → [1.95,3.89,5.84,7.80]
+//   Expected for SIMT ReLU with inputs [+5, -3, +8, -1]:
+//     R:00000005 00000000 00000008 00000000
 //
-// NOTE: If UART pin 69 shows no output, verify the pin using
-//   Gowin EDA → Tools → Visual Constraint Editor → Add from Template
-//   for device GW2AR-18C, then update uart_tx in gpu_top.cst.
+// Result capture:
+//   Snoops core 0's data write bus. mem_controller serialises
+//   T0..T3 writes, so each write to mem[4..7] appears as a
+//   separate req_valid pulse on data_mem_req_valid[0].
 //
 // LEDs (active-LOW):
-//   led[0]   = kernel_done (solid ON when all 4 blocks complete)
-//   led[5:1] = rolling heartbeat (confirms board alive, ~1.6 Hz)
+//   led[0]   = kernel_done (solid ON when inference finishes)
+//   led[5:1] = rolling heartbeat (~1.6 Hz on fast clk)
 
 module gpu_fpga_top (
-    input  wire       clk,       // 27 MHz, pin 4 (Tang Nano 20K oscillator)
-    input  wire       rst_n,     // power-on reset (unused — replaced by counter)
-    output wire [5:0] led,       // active-LOW LEDs, pins 15–20
-    output wire       uart_tx    // UART TX to BL616, pin 69, 115200 8N1
+    input  wire       clk,       // 27 MHz, pin 4
+    input  wire       rst_n,     // unused — replaced by POR counter
+    output wire [5:0] led,       // active-LOW LEDs
+    output wire       uart_tx    // 115200 8N1 → BL616, pin 69
 );
 
-localparam NUM_CORES        = 1;
-localparam THREADS_PER_CORE = 1;
-localparam TOTAL_THREADS    = 1;
-localparam PROG_DEPTH       = 64;
-localparam DATA_DEPTH       = 32;
+localparam NUM_CORES        = 4;
+localparam THREADS_PER_CORE = 4;
+localparam PROG_DEPTH       = 64;    // words per core (64 × 32-bit)
+localparam DATA_DEPTH       = 256;   // words per core (256 × 32-bit)
 
 // ─── Power-on reset (no physical button) ─────────────────────────────────────
 reg [7:0] por_cnt = 0;
 wire      rst_raw = !por_cnt[7];
 always @(posedge clk) if (!por_cnt[7]) por_cnt <= por_cnt + 1;
 
-// 2-FF reset synchronizer
 reg rst_r1, rst_sync;
 always @(posedge clk or posedge rst_raw) begin
     if (rst_raw) begin rst_r1 <= 1; rst_sync <= 1; end
@@ -66,36 +71,39 @@ always @(posedge clk or posedge rst_sync) begin
     else clk_div <= clk_div + 1;
 end
 
-// ─── GPU port wires ───────────────────────────────────────────────────────────
+// ─── GPU port wires — 4-wide packed interfaces ───────────────────────────────
 wire        dcr_write_en;
 wire [1:0]  dcr_addr;
 wire [31:0] dcr_data;
 wire        kernel_done;
 wire [31:0] thread_keep_alive;
 
-wire [0:0]  prog_mem_req_valid;
-wire [31:0] prog_mem_req_addr;
-wire [0:0]  prog_mem_resp_valid;
-wire [31:0] prog_mem_resp_data;
+// Prog memory: 1 port per core, packed 128-bit address/data buses
+wire [NUM_CORES-1:0]        prog_mem_req_valid;
+wire [(NUM_CORES*32)-1:0]   prog_mem_req_addr;
+wire [NUM_CORES-1:0]        prog_mem_resp_valid;
+wire [(NUM_CORES*32)-1:0]   prog_mem_resp_data;
 
-wire [0:0]  data_mem_req_valid;
-wire [31:0] data_mem_req_addr;
-wire [0:0]  data_mem_req_rw;
-wire [31:0] data_mem_req_data;
-wire [0:0]  data_mem_resp_valid;
-wire [31:0] data_mem_resp_data;
+// Data memory: 1 port per core (mem_controller has already arbitrated threads)
+wire [NUM_CORES-1:0]        data_mem_req_valid;
+wire [(NUM_CORES*32)-1:0]   data_mem_req_addr;
+wire [NUM_CORES-1:0]        data_mem_req_rw;     // 1=read, 0=write (lsu.sv convention)
+wire [(NUM_CORES*32)-1:0]   data_mem_req_data;
+wire [NUM_CORES-1:0]        data_mem_resp_valid;
+wire [(NUM_CORES*32)-1:0]   data_mem_resp_data;
 
 // ─── GPU instance (clk_slow domain) ──────────────────────────────────────────
 gpu #(
-    .NUM_CORES(NUM_CORES),
+    .NUM_CORES       (NUM_CORES),
     .THREADS_PER_CORE(THREADS_PER_CORE)
 ) gpu_inst (
-    .clk              (clk_slow),
-    .rst              (rst_sync),
-    .dcr_write_en     (dcr_write_en),
-    .dcr_addr         (dcr_addr),
-    .dcr_data         (dcr_data),
-    .kernel_done      (kernel_done),
+    .clk               (clk_slow),
+    .rst               (rst_sync),
+    .dcr_write_en      (dcr_write_en),
+    .dcr_addr          (dcr_addr),
+    .dcr_data          (dcr_data),
+    .kernel_done       (kernel_done),
+    .thread_keep_alive (thread_keep_alive),
     .prog_mem_req_valid(prog_mem_req_valid),
     .prog_mem_req_addr (prog_mem_req_addr),
     .prog_mem_resp_valid(prog_mem_resp_valid),
@@ -105,14 +113,14 @@ gpu #(
     .data_mem_req_rw   (data_mem_req_rw),
     .data_mem_req_data (data_mem_req_data),
     .data_mem_resp_valid(data_mem_resp_valid),
-    .data_mem_resp_data (data_mem_resp_data),
-    .thread_keep_alive (thread_keep_alive)
+    .data_mem_resp_data (data_mem_resp_data)
 );
 
 // ─── Boot dispatch FSM (clk_slow domain) ─────────────────────────────────────
-// Writes DCR registers to start 4 sequential blocks (num_blocks=4, blockDim=1).
-// With THREADS_PER_CORE=1 and the r29=blockIdx patch in registers.sv,
-// each block computes one output neuron: y[blockIdx].
+// SIMT: num_blocks=1, blockDim=4 → single start pulse is sufficient.
+// (SIMD needed continuous dispatch_en because 4 blocks ran sequentially
+//  through 1 core. SIMT runs 4 threads in 1 block — dispatcher fills it
+//  in one cycle and kernel_done fires when that block completes.)
 reg [2:0]  dstate;
 reg [3:0]  boot_cnt;
 reg        dcr_we_r;
@@ -130,46 +138,36 @@ always @(posedge clk_slow or posedge rst_sync) begin
     end else begin
         dcr_we_r <= 0;
         case (dstate)
-            3'd0: begin
+            3'd0: begin  // startup hold — let GPU come out of reset cleanly
                 if (boot_cnt == 4'd7) dstate <= 1;
                 else boot_cnt <= boot_cnt + 1;
             end
-            3'd1: begin // num_blocks = 4
-                dcr_we_r <= 1; dcr_addr_r <= 2'b00; dcr_data_r <= 32'd4;
+            3'd1: begin  // write num_blocks = 1
+                dcr_we_r <= 1; dcr_addr_r <= 2'b00; dcr_data_r <= 32'd1;
                 dstate <= 2;
             end
-            3'd2: begin // blockDim = 1
-                dcr_we_r <= 1; dcr_addr_r <= 2'b01; dcr_data_r <= 32'd1;
+            3'd2: begin  // write blockDim = 4 (one block of 4 threads)
+                dcr_we_r <= 1; dcr_addr_r <= 2'b01; dcr_data_r <= 32'd4;
                 dstate <= 3;
             end
-            3'd3: begin
-                // Keep dispatch_en=1 every cycle until kernel_done.
-                // With NUM_CORES=1 and num_blocks=4, the dispatcher needs
-                // dispatch_en asserted when each block completes so it can
-                // assign the next block. A single pulse only dispatches block 0.
-                dcr_we_r   <= 1'b1;
-                dcr_addr_r <= 2'b10;
-                dcr_data_r <= 32'd0;
-                if (kernel_done) begin
-                    dcr_we_r <= 1'b0; // stop after all blocks complete
-                    dstate   <= 3'd4;
-                end
+            3'd3: begin  // single start pulse — dispatcher assigns block 0 to core 0
+                dcr_we_r <= 1; dcr_addr_r <= 2'b10; dcr_data_r <= 32'd1;
+                dstate <= 4;
             end
-            3'd4: ;  // GPU done, kernel_done latched
+            3'd4: ;  // idle — GPU is running, wait for kernel_done
         endcase
     end
 end
 
 // ─── Cycle timer (clk_slow domain) ───────────────────────────────────────────
-// Counts clk_slow cycles from the start command to kernel_done.
-// Resolution: 1 cycle = 296.3 ns at 3.375 MHz.
+// Counts from start pulse to kernel_done. Resolution: 296 ns per tick.
 reg [31:0] cycle_count;
 reg        timing_active;
 wire       start_pulse = dcr_we_r && (dcr_addr_r == 2'b10);
 
 always @(posedge clk_slow or posedge rst_sync) begin
     if (rst_sync) begin
-        cycle_count  <= 32'd0;
+        cycle_count   <= 32'd0;
         timing_active <= 1'b0;
     end else if (start_pulse && !timing_active) begin
         cycle_count   <= 32'd0;
@@ -180,56 +178,91 @@ always @(posedge clk_slow or posedge rst_sync) begin
     end
 end
 
-// ─── Result capture (snoop GPU write bus) ────────────────────────────────────
-// Captures y[0..3] as the GPU writes them to BRAM addresses 20..23.
-// No extra BRAM read port needed — we observe the write data bus directly.
+// ─── Result capture — snoop core 0 data write bus ────────────────────────────
+// SIMT ReLU: T0 writes mem[4], T1 writes mem[5], T2 writes mem[6], T3 writes mem[7].
+// mem_controller serialises these → 4 separate req_valid pulses on port 0.
+// Capture each write address to reconstruct the full output vector.
 reg [31:0] result [0:3];
 always @(posedge clk_slow) begin
     if (data_mem_req_valid[0] && (data_mem_req_rw[0] == 1'b0)) begin
-        if (data_mem_req_addr == 32'd20) result[0] <= data_mem_req_data;
-        if (data_mem_req_addr == 32'd21) result[1] <= data_mem_req_data;
-        if (data_mem_req_addr == 32'd22) result[2] <= data_mem_req_data;
-        if (data_mem_req_addr == 32'd23) result[3] <= data_mem_req_data;
+        case (data_mem_req_addr[31:0])
+            32'd4: result[0] <= data_mem_req_data[31:0];
+            32'd5: result[1] <= data_mem_req_data[31:0];
+            32'd6: result[2] <= data_mem_req_data[31:0];
+            32'd7: result[3] <= data_mem_req_data[31:0];
+            default: ;
+        endcase
     end
 end
 
-// ─── Program BRAM (64 × 32-bit, clk_slow domain) ─────────────────────────────
-reg [31:0] prog_bram [0:PROG_DEPTH-1];
-initial $readmemh("prog_mem.hex", prog_bram);
+// ─── Program BRAMs: 4 × PROG_DEPTH, one per core (clk_slow domain) ───────────
+// All 4 BRAMs load the same kernel hex — each core runs independently.
+// 1-cycle latency: req_valid → resp_valid next cycle.
+genvar p;
+generate
+    for (p = 0; p < NUM_CORES; p = p + 1) begin : prog_mem_gen
+        reg [31:0] bram [0:PROG_DEPTH-1];
+        reg        resp_r;
+        reg [31:0] data_r;
 
-reg        prog_resp_r;
-reg [31:0] prog_data_r;
-always @(posedge clk_slow or posedge rst_sync) begin
-    if (rst_sync) begin prog_resp_r <= 0; prog_data_r <= 0; end
-    else begin
-        prog_resp_r <= prog_mem_req_valid[0];
-        prog_data_r <= prog_bram[prog_mem_req_addr[7:0]];
-    end
-end
-assign prog_mem_resp_valid = prog_resp_r;
-assign prog_mem_resp_data  = prog_data_r;
+        // Extract this core's slice once for readability
+        wire [31:0] req_addr_p = prog_mem_req_addr[p*32+:32];
 
-// ─── Data BRAM (32 × 32-bit, thread 0, clk_slow domain) ──────────────────────
-reg [31:0] data_bram_0 [0:DATA_DEPTH-1];
-initial $readmemh("data_mem.hex", data_bram_0);
+        initial $readmemh("prog_mem.hex", bram);
 
-reg        data_resp_r;
-reg [31:0] data_data_r;
-always @(posedge clk_slow or posedge rst_sync) begin
-    if (rst_sync) begin data_resp_r <= 0; data_data_r <= 0; end
-    else begin
-        if (data_mem_req_valid[0]) begin
-            if (data_mem_req_rw[0] == 1'b0)
-                data_bram_0[data_mem_req_addr[31:0]] <= data_mem_req_data;
-            data_data_r <= data_bram_0[data_mem_req_addr[31:0]];
+        always @(posedge clk_slow or posedge rst_sync) begin
+            if (rst_sync) begin resp_r <= 0; data_r <= 0; end
+            else begin
+                // Read every cycle (BRAM read-before-write, no hazard for RO prog mem)
+                resp_r <= prog_mem_req_valid[p];
+                data_r <= bram[req_addr_p[5:0]];   // [5:0] → depth 64
+            end
         end
-        data_resp_r <= data_mem_req_valid[0];
-    end
-end
-assign data_mem_resp_valid = data_resp_r;
-assign data_mem_resp_data  = data_data_r;
 
-// ─── LEDs ─────────────────────────────────────────────────────────────────────
+        assign prog_mem_resp_valid[p]       = resp_r;
+        assign prog_mem_resp_data[p*32+:32] = data_r;
+    end
+endgenerate
+
+// ─── Data BRAMs: 4 × DATA_DEPTH, one per core (clk_slow domain) ──────────────
+// Each core's mem_controller has already serialised 4 thread requests
+// into a single valid/addr/rw/data channel. The wrapper provides one
+// simple 1-cycle-latency BRAM bank per core — no further arbitration needed.
+//
+// Read/write convention (lsu.sv): rw=1 → read, rw=0 → write.
+// On a write cycle, data_r returns the old value — this is harmless
+// because the LSU only checks resp_valid on writes, not resp_data.
+genvar c;
+generate
+    for (c = 0; c < NUM_CORES; c = c + 1) begin : data_mem_gen
+        reg [31:0] bram [0:DATA_DEPTH-1];
+        reg        resp_r;
+        reg [31:0] data_r;
+
+        // Extract this core's slice once — avoids nested part-select
+        wire [31:0] req_addr_c = data_mem_req_addr[c*32+:32];
+        wire [31:0] req_data_c = data_mem_req_data[c*32+:32];
+
+        initial $readmemh("data_mem.hex", bram);
+
+        always @(posedge clk_slow or posedge rst_sync) begin
+            if (rst_sync) begin resp_r <= 0; data_r <= 0; end
+            else begin
+                if (data_mem_req_valid[c]) begin
+                    if (!data_mem_req_rw[c])                // rw=0 → write
+                        bram[req_addr_c[7:0]] <= req_data_c;
+                    data_r <= bram[req_addr_c[7:0]];        // always read back
+                end
+                resp_r <= data_mem_req_valid[c];
+            end
+        end
+
+        assign data_mem_resp_valid[c]       = resp_r;
+        assign data_mem_resp_data[c*32+:32] = data_r;
+    end
+endgenerate
+
+// ─── LEDs (active-LOW) ────────────────────────────────────────────────────────
 reg [24:0] heartbeat;
 always @(posedge clk) heartbeat <= heartbeat + 1;
 
@@ -237,20 +270,19 @@ assign led[0]   = ~(kernel_done | thread_keep_alive[31]);
 assign led[5:1] = ~heartbeat[22:18];
 
 // ─── UART TX module (27 MHz fast clock, 115200 baud, 8N1) ────────────────────
-// Divisor = 27,000,000 / 115,200 = 234  (0.16% error — within UART tolerance)
-// Pin 69 → BL616 USB-UART bridge.  Open the higher COM port in your terminal.
+// Divisor = 27,000,000 / 115,200 = 234  (0.16% error)
 localparam UART_DIV = 8'd234;
 
-reg [7:0]  uart_byte;
-reg        uart_send;
-wire       uart_busy;
-reg        uart_tx_r;
-assign uart_tx = uart_tx_r;
+reg [7:0] uart_byte;
+reg       uart_send;
+wire      uart_busy;
+reg       uart_tx_r;
+assign uart_tx   = uart_tx_r;
 
-reg [7:0]  u_clk_cnt;
-reg [3:0]  u_bit_cnt;
-reg [9:0]  u_shift;
-reg        u_sending;
+reg [7:0] u_clk_cnt;
+reg [3:0] u_bit_cnt;
+reg [9:0] u_shift;
+reg       u_sending;
 assign uart_busy = u_sending;
 
 always @(posedge clk or posedge rst_sync) begin
@@ -258,7 +290,6 @@ always @(posedge clk or posedge rst_sync) begin
         uart_tx_r <= 1; u_sending <= 0;
         u_clk_cnt <= 0; u_bit_cnt <= 0; u_shift <= 0;
     end else if (!u_sending && uart_send) begin
-        // Load: stop(1) | data[7:0] | start(0)  — LSB sent first
         u_shift   <= {1'b1, uart_byte, 1'b0};
         u_sending <= 1; u_clk_cnt <= 0; u_bit_cnt <= 0;
     end else if (u_sending) begin
@@ -268,12 +299,8 @@ always @(posedge clk or posedge rst_sync) begin
             u_shift   <= {1'b1, u_shift[9:1]};
             if (u_bit_cnt == 9) u_sending <= 0;
             else u_bit_cnt <= u_bit_cnt + 1;
-        end else begin
-            u_clk_cnt <= u_clk_cnt + 1;
-        end
-    end else begin
-        uart_tx_r <= 1;
-    end
+        end else u_clk_cnt <= u_clk_cnt + 1;
+    end else uart_tx_r <= 1;
 end
 
 // ─── CDC: kernel_done (clk_slow) → fast clock domain ─────────────────────────
@@ -281,11 +308,11 @@ reg kd_s1, kd_s2, kd_s3;
 always @(posedge clk) begin
     kd_s1 <= kernel_done; kd_s2 <= kd_s1; kd_s3 <= kd_s2;
 end
-wire kd_rise = kd_s2 & ~kd_s3;  // single-cycle pulse on rising edge
+wire kd_rise = kd_s2 & ~kd_s3;
 
-// ─── CDC: cycle_count + results (clk_slow → fast clock) ─────────────────────
-// Latch all values simultaneously on kernel_done to avoid metastability.
-// kernel_done is a stable flag after it asserts (never de-asserts until reset).
+// ─── CDC: latch cycle_count + results on kernel_done ─────────────────────────
+// kernel_done is a stable flag (never de-asserts until reset), so
+// result[] and cycle_count are stable before kd_rise fires on clk.
 reg [31:0] saved_cycles;
 reg [31:0] saved_y0, saved_y1, saved_y2, saved_y3;
 always @(posedge clk) begin
@@ -298,31 +325,31 @@ always @(posedge clk) begin
     end
 end
 
-// ─── Hex nibble to ASCII helper ───────────────────────────────────────────────
+// ─── Hex nibble → ASCII ───────────────────────────────────────────────────────
 function [7:0] h2a;
     input [3:0] n;
     h2a = (n < 4'hA) ? (8'h30 + {4'b0, n}) : (8'h57 + {4'b0, n});
-    // 0x57 = 'a' - 10, so n=0xA→'a', n=0xF→'f'
 endfunction
 
-// ─── Message byte lookup (62 bytes total) ────────────────────────────────────
-// Output:
-//   "GPU DONE\r\n"     (10 bytes, pos 0-9)
-//   "T:XXXXXXXX\r\n"   (12 bytes, pos 10-21)
-//   "Y:YYYYYYYY YYYYYYYY YYYYYYYY YYYYYYYY\r\n"  (40 bytes, pos 22-61)
+// ─── UART message byte lookup (62 bytes) ─────────────────────────────────────
+// "SIMT GPU\r\n"  (10 bytes, pos  0-9)
+// "T:XXXXXXXX\r\n"  (12 bytes, pos 10-21)
+// "R:YYYYYYYY YYYYYYYY YYYYYYYY YYYYYYYY\r\n"  (40 bytes, pos 22-61)
+//   Y = mem[4] mem[5] mem[6] mem[7]  (SIMT ReLU outputs)
 reg [7:0] cur_byte;
-reg [5:0] msg_pos;   // 0-61
+reg [5:0] msg_pos;
+
 always @(*) begin
     case (msg_pos)
-        // "GPU DONE\r\n"
-        6'd0:  cur_byte = "G";
-        6'd1:  cur_byte = "P";
-        6'd2:  cur_byte = "U";
-        6'd3:  cur_byte = " ";
-        6'd4:  cur_byte = "D";
-        6'd5:  cur_byte = "O";
-        6'd6:  cur_byte = "N";
-        6'd7:  cur_byte = "E";
+        // "SIMT GPU\r\n"
+        6'd0:  cur_byte = "S";
+        6'd1:  cur_byte = "I";
+        6'd2:  cur_byte = "M";
+        6'd3:  cur_byte = "T";
+        6'd4:  cur_byte = " ";
+        6'd5:  cur_byte = "G";
+        6'd6:  cur_byte = "P";
+        6'd7:  cur_byte = "U";
         6'd8:  cur_byte = 8'h0D;
         6'd9:  cur_byte = 8'h0A;
         // "T:"
@@ -339,11 +366,11 @@ always @(*) begin
         6'd19: cur_byte = h2a(saved_cycles[3:0]);
         6'd20: cur_byte = 8'h0D;
         6'd21: cur_byte = 8'h0A;
-        // "Y: "
-        6'd22: cur_byte = "Y";
+        // "R: " — R for ReLU outputs
+        6'd22: cur_byte = "R";
         6'd23: cur_byte = ":";
         6'd24: cur_byte = " ";
-        // y[0]
+        // mem[4] — T0 ReLU output
         6'd25: cur_byte = h2a(saved_y0[31:28]);
         6'd26: cur_byte = h2a(saved_y0[27:24]);
         6'd27: cur_byte = h2a(saved_y0[23:20]);
@@ -353,7 +380,7 @@ always @(*) begin
         6'd31: cur_byte = h2a(saved_y0[7:4]);
         6'd32: cur_byte = h2a(saved_y0[3:0]);
         6'd33: cur_byte = " ";
-        // y[1]
+        // mem[5] — T1 ReLU output
         6'd34: cur_byte = h2a(saved_y1[31:28]);
         6'd35: cur_byte = h2a(saved_y1[27:24]);
         6'd36: cur_byte = h2a(saved_y1[23:20]);
@@ -363,7 +390,7 @@ always @(*) begin
         6'd40: cur_byte = h2a(saved_y1[7:4]);
         6'd41: cur_byte = h2a(saved_y1[3:0]);
         6'd42: cur_byte = " ";
-        // y[2]
+        // mem[6] — T2 ReLU output
         6'd43: cur_byte = h2a(saved_y2[31:28]);
         6'd44: cur_byte = h2a(saved_y2[27:24]);
         6'd45: cur_byte = h2a(saved_y2[23:20]);
@@ -373,7 +400,7 @@ always @(*) begin
         6'd49: cur_byte = h2a(saved_y2[7:4]);
         6'd50: cur_byte = h2a(saved_y2[3:0]);
         6'd51: cur_byte = " ";
-        // y[3]
+        // mem[7] — T3 ReLU output
         6'd52: cur_byte = h2a(saved_y3[31:28]);
         6'd53: cur_byte = h2a(saved_y3[27:24]);
         6'd54: cur_byte = h2a(saved_y3[23:20]);
@@ -389,13 +416,7 @@ always @(*) begin
 end
 
 // ─── UART message sender FSM (fast clock domain) ──────────────────────────────
-// Triggered by kernel_done rising edge (kd_rise).
-// Sends 62 ASCII bytes over UART one at a time.
-localparam MS_IDLE = 2'd0;
-localparam MS_SEND = 2'd1;
-localparam MS_WAIT = 2'd2;
-localparam MS_DONE = 2'd3;
-
+localparam MS_IDLE = 2'd0, MS_SEND = 2'd1, MS_WAIT = 2'd2, MS_DONE = 2'd3;
 reg [1:0] ms_state;
 
 always @(posedge clk or posedge rst_sync) begin
@@ -429,7 +450,7 @@ always @(posedge clk or posedge rst_sync) begin
                     end
                 end
             end
-            MS_DONE: ; // stay here — output sent
+            MS_DONE: ;  // stay — output sent, board idle until reset
         endcase
     end
 end
