@@ -403,14 +403,12 @@ This avoids packed-object indexing issues in cocotb and keeps the test aligned w
 
 The controller assumes:
 
-```text
 - LSU req_valid[i] is a one-cycle pulse.
 - req_addr[i], req_rw[i], and req_data[i] are valid when req_valid[i] is high.
 - Only one external memory request is in flight at a time.
 - mem_resp_valid means mem_resp_data is valid in the same cycle.
 - resp_valid[in_flight] is a one-cycle pulse.
 - The target LSU captures resp_data[in_flight] when resp_valid[in_flight] is high.
-```
 
 ## Reset behavior
 

@@ -406,49 +406,378 @@ module core (
 	assign thread_keep_alive = _keep_xor[THREADS_PER_CORE];
 	initial _sv2v_0 = 0;
 endmodule
-module warp_stack (
+(* syn_dont_touch = 1 *) module pc (
 	clk,
 	rst,
-	push,
-	push_sync_pc,
-	push_saved_mask,
-	pop,
-	top_sync_pc,
-	top_saved_mask,
-	stack_empty,
-	stack_full,
-	stack_overflow
+	block_rst,
+	pc_en,
+	branch_en,
+	branch_offset,
+	nzp_en,
+	nzp_flag,
+	nzp_mask,
+	pc_out,
+	nzp_out
 );
-	parameter THREADS_PER_CORE = 4;
-	parameter STACK_DEPTH = 4;
 	input wire clk;
 	input wire rst;
-	input wire push;
-	input wire [31:0] push_sync_pc;
-	input wire [THREADS_PER_CORE - 1:0] push_saved_mask;
-	input wire pop;
-	output wire [31:0] top_sync_pc;
-	output wire [THREADS_PER_CORE - 1:0] top_saved_mask;
-	output wire stack_empty;
-	output wire stack_full;
-	output wire stack_overflow;
-	reg [35:0] stack_mem [STACK_DEPTH - 1:0];
-	reg [2:0] sp;
-	assign stack_empty = sp == 0;
-	assign stack_full = sp == STACK_DEPTH;
-	assign stack_overflow = push && stack_full;
-	assign top_sync_pc = (sp > 0 ? stack_mem[sp - 1][35:4] : 32'b00000000000000000000000000000000);
-	assign top_saved_mask = (sp > 0 ? stack_mem[sp - 1][3:0] : {THREADS_PER_CORE {1'sb1}});
+	input wire block_rst;
+	input wire pc_en;
+	input wire branch_en;
+	input wire [11:0] branch_offset;
+	input wire nzp_en;
+	input wire [2:0] nzp_flag;
+	input wire [2:0] nzp_mask;
+	output reg [31:0] pc_out;
+	output wire [2:0] nzp_out;
+	reg [2:0] nzp_reg;
 	always @(posedge clk or posedge rst)
-		if (rst)
-			sp <= 0;
+		if (rst) begin
+			pc_out <= 32'b00000000000000000000000000000000;
+			nzp_reg <= 3'b000;
+		end
+		else if (block_rst) begin
+			pc_out <= 32'b00000000000000000000000000000000;
+			nzp_reg <= 3'b000;
+		end
 		else begin
-			if (push && !stack_full) begin
-				stack_mem[sp] <= {push_sync_pc, push_saved_mask};
-				sp <= sp + 1;
+			if (nzp_en)
+				nzp_reg <= nzp_flag;
+			if (pc_en) begin
+				if (branch_en && ((nzp_reg & nzp_mask) != 0))
+					pc_out <= pc_out + branch_offset;
+				else
+					pc_out <= pc_out + 1;
 			end
-			if (pop && !stack_empty)
-				sp <= sp - 1;
+		end
+	assign nzp_out = nzp_reg;
+endmodule
+(* syn_dont_touch = 1 *) module alu (
+	operand1,
+	operand2,
+	operand3,
+	op_select,
+	result,
+	nzp_flag
+);
+	reg _sv2v_0;
+	input wire [31:0] operand1;
+	input wire [31:0] operand2;
+	input wire [31:0] operand3;
+	input wire [5:0] op_select;
+	output reg [31:0] result;
+	output reg [2:0] nzp_flag;
+	always @(*) begin
+		if (_sv2v_0)
+			;
+		result = 32'b00000000000000000000000000000000;
+		nzp_flag = 3'b000;
+		case (op_select)
+			6'h01: result = operand1 + operand2;
+			6'h02: result = operand1 - operand2;
+			6'h03: result = operand1 * operand2;
+			6'h04: result = operand1 / operand2;
+			6'h05: result = operand1 % operand2;
+			6'h06: result = operand1 << operand2;
+			6'h07: result = operand1 >> operand2;
+			6'h08: result = operand1 & operand2;
+			6'h09: result = operand1 | operand2;
+			6'h0a: result = operand1 ^ operand2;
+			6'h0b: result = ~operand1;
+			6'h0c: result = (operand1 * operand2) + operand3;
+			6'h0d: begin
+				result = 0;
+				nzp_flag = (($signed(operand1) - $signed(operand2)) == 0 ? 3'b010 : (($signed(operand1) - $signed(operand2)) > 0 ? 3'b001 : 3'b100));
+			end
+			6'h13: result = $signed(operand1) * $signed(operand2);
+			6'h14: result = $signed(operand1) >>> operand2;
+			default:
+				;
+		endcase
+	end
+	initial _sv2v_0 = 0;
+endmodule
+module decoder (
+	instruction,
+	opcode,
+	rd_addr,
+	rs1_addr,
+	rs2_addr,
+	rs3_addr,
+	imm,
+	nzp_mask,
+	sync_offset,
+	branch_offset,
+	sync_en,
+	ret,
+	write_back_en,
+	mem_read_en,
+	mem_write_en,
+	branch_en,
+	nzp_en
+);
+	reg _sv2v_0;
+	input wire [31:0] instruction;
+	output wire [5:0] opcode;
+	output wire [4:0] rd_addr;
+	output wire [4:0] rs1_addr;
+	output wire [4:0] rs2_addr;
+	output wire [4:0] rs3_addr;
+	output wire [15:0] imm;
+	output wire [2:0] nzp_mask;
+	output wire [10:0] sync_offset;
+	output wire [11:0] branch_offset;
+	output reg sync_en;
+	output reg ret;
+	output reg write_back_en;
+	output reg mem_read_en;
+	output reg mem_write_en;
+	output reg branch_en;
+	output reg nzp_en;
+	assign opcode = instruction[31:26];
+	assign rd_addr = instruction[25:21];
+	assign rs1_addr = instruction[20:16];
+	assign rs2_addr = instruction[15:11];
+	assign rs3_addr = instruction[10:6];
+	assign imm = instruction[15:0];
+	assign nzp_mask = instruction[25:23];
+	assign sync_offset = instruction[22:12];
+	assign branch_offset = instruction[11:0];
+	always @(*) begin
+		if (_sv2v_0)
+			;
+		ret = 1'b0;
+		write_back_en = 1'b0;
+		mem_read_en = 1'b0;
+		mem_write_en = 1'b0;
+		branch_en = 1'b0;
+		nzp_en = 1'b0;
+		sync_en = 1'b0;
+		case (opcode)
+			6'h00:
+				;
+			6'h01, 6'h02, 6'h03, 6'h04, 6'h05, 6'h06, 6'h07, 6'h08, 6'h09, 6'h0a, 6'h0b, 6'h0c, 6'h13, 6'h14: write_back_en = 1'b1;
+			6'h0d: nzp_en = 1'b1;
+			6'h0e: branch_en = 1'b1;
+			6'h0f: begin
+				mem_read_en = 1'b1;
+				write_back_en = 1'b1;
+			end
+			6'h10: mem_write_en = 1'b1;
+			6'h11: write_back_en = 1'b1;
+			6'h12: ret = 1'b1;
+			6'h15: sync_en = 1'b1;
+			default:
+				;
+		endcase
+	end
+	initial _sv2v_0 = 0;
+endmodule
+module dispatcher (
+	clk,
+	rst,
+	num_blocks,
+	blockDim,
+	dispatch_en,
+	block_done,
+	core_start,
+	blockIdx_out,
+	kernel_done
+);
+	parameter NUM_CORES = 4;
+	parameter THREADS_PER_CORE = 4;
+	input wire clk;
+	input wire rst;
+	input wire [31:0] num_blocks;
+	input wire [31:0] blockDim;
+	input wire dispatch_en;
+	input wire [NUM_CORES - 1:0] block_done;
+	output reg [NUM_CORES - 1:0] core_start;
+	output reg [(NUM_CORES * 32) - 1:0] blockIdx_out;
+	output reg kernel_done;
+	reg [31:0] next_block;
+	reg [31:0] active_blocks;
+	reg assigned;
+	reg [31:0] done_count;
+	reg signed [31:0] delta;
+	always @(posedge clk or posedge rst)
+		if (rst) begin
+			next_block <= 0;
+			active_blocks <= 0;
+			kernel_done <= 0;
+			begin : sv2v_autoblock_1
+				reg signed [31:0] i;
+				for (i = 0; i < NUM_CORES; i = i + 1)
+					begin
+						core_start[i] <= 0;
+						blockIdx_out[i * 32+:32] <= 0;
+					end
+			end
+		end
+		else begin
+			done_count = 0;
+			delta = 0;
+			begin : sv2v_autoblock_2
+				reg signed [31:0] i;
+				for (i = 0; i < NUM_CORES; i = i + 1)
+					if (block_done[i]) begin
+						core_start[i] <= 0;
+						done_count = done_count + 1;
+						delta = delta - 1;
+					end
+			end
+			if (dispatch_en) begin
+				assigned = 0;
+				begin : sv2v_autoblock_3
+					reg signed [31:0] i;
+					for (i = 0; i < NUM_CORES; i = i + 1)
+						if (((!assigned && (core_start[i] == 0)) && (block_done[i] == 0)) && (next_block < num_blocks)) begin
+							core_start[i] <= 1;
+							blockIdx_out[i * 32+:32] <= next_block;
+							next_block <= next_block + 1;
+							delta = delta + 1;
+							assigned = 1;
+						end
+				end
+			end
+			active_blocks <= active_blocks + delta;
+			if (((next_block == num_blocks) && ((active_blocks + delta) == 0)) && (num_blocks > 0))
+				kernel_done <= 1;
+		end
+endmodule
+module fetcher (
+	clk,
+	rst,
+	core_en,
+	pc_value,
+	instruction,
+	done,
+	req_valid,
+	req_addr,
+	resp_valid,
+	resp_data
+);
+	input wire clk;
+	input wire rst;
+	input wire core_en;
+	input wire [31:0] pc_value;
+	output reg [31:0] instruction;
+	output reg done;
+	output reg req_valid;
+	output reg [31:0] req_addr;
+	input wire resp_valid;
+	input wire [31:0] resp_data;
+	reg state;
+	always @(posedge clk or posedge rst)
+		if (rst) begin
+			state <= 1'b0;
+			instruction <= 32'b00000000000000000000000000000000;
+			req_valid <= 0;
+			req_addr <= 32'b00000000000000000000000000000000;
+			done <= 0;
+		end
+		else begin
+			req_valid <= 0;
+			done <= 0;
+			case (state)
+				1'b0:
+					if (core_en) begin
+						req_addr <= pc_value;
+						req_valid <= 1;
+						done <= 0;
+						state <= 1'b1;
+					end
+				1'b1:
+					if (resp_valid) begin
+						instruction <= resp_data;
+						done <= 1;
+						state <= 1'b0;
+					end
+				default:
+					;
+			endcase
+		end
+endmodule
+module lsu (
+	clk,
+	rst,
+	core_en,
+	done,
+	mem_data_address,
+	req_valid,
+	req_addr,
+	write_data,
+	resp_valid,
+	resp_data,
+	mem_write_en,
+	mem_write_data,
+	mem_read_en,
+	mem_read_data,
+	read_write_switch
+);
+	input wire clk;
+	input wire rst;
+	input wire core_en;
+	output reg done;
+	input wire [31:0] mem_data_address;
+	output reg req_valid;
+	output reg [31:0] req_addr;
+	output reg [31:0] write_data;
+	input wire resp_valid;
+	input wire [31:0] resp_data;
+	input wire mem_write_en;
+	input wire [31:0] mem_write_data;
+	input wire mem_read_en;
+	output reg [31:0] mem_read_data;
+	output reg read_write_switch;
+	reg is_read;
+	reg state;
+	always @(posedge clk or posedge rst)
+		if (rst) begin
+			req_valid <= 0;
+			req_addr <= 32'b00000000000000000000000000000000;
+			mem_read_data <= 32'b00000000000000000000000000000000;
+			done <= 0;
+			is_read <= 0;
+			state <= 1'b0;
+		end
+		else begin
+			req_valid <= 0;
+			req_addr <= 32'b00000000000000000000000000000000;
+			done <= 0;
+			case (state)
+				1'b0:
+					if (core_en) begin
+						if (mem_read_en) begin
+							is_read <= 1;
+							req_addr <= mem_data_address;
+							req_valid <= 1;
+							read_write_switch <= 1;
+							state <= 1'b1;
+						end
+						else if (mem_write_en) begin
+							is_read <= 0;
+							req_addr <= mem_data_address;
+							req_valid <= 1;
+							read_write_switch <= 0;
+							write_data <= mem_write_data;
+							state <= 1'b1;
+						end
+					end
+				1'b1:
+					if (is_read) begin
+						if (resp_valid) begin
+							mem_read_data <= resp_data;
+							done <= 1;
+							state <= 1'b0;
+						end
+					end
+					else if (resp_valid) begin
+						done <= 1;
+						state <= 1'b0;
+					end
+				default: state <= 1'b0;
+			endcase
 		end
 endmodule
 module mem_controller (
@@ -604,111 +933,84 @@ module mem_controller (
 		end
 	initial _sv2v_0 = 0;
 endmodule
-module dcr (
+(* syn_dont_touch = 1 *) module registers (
 	clk,
 	rst,
-	dcr_write_en,
-	dcr_addr,
-	dcr_data,
-	num_blocks,
+	r_addr1,
+	r_addr2,
+	r_addr3,
+	w_addr,
+	w_data,
+	w_en,
+	threadIdx,
+	blockIdx,
 	blockDim,
-	start
+	r_data1,
+	r_data2,
+	r_data3
 );
+	reg _sv2v_0;
 	input wire clk;
 	input wire rst;
-	input wire dcr_write_en;
-	input wire [1:0] dcr_addr;
-	input wire [31:0] dcr_data;
-	output reg [31:0] num_blocks;
-	output reg [31:0] blockDim;
-	output reg start;
-	always @(posedge clk or posedge rst)
-		if (rst) begin
-			num_blocks <= 0;
-			blockDim <= 0;
-			start <= 0;
-		end
-		else begin
-			start <= 0;
-			if (dcr_write_en)
-				case (dcr_addr)
-					2'b00: num_blocks <= dcr_data;
-					2'b01: blockDim <= dcr_data;
-					2'b10: start <= 1;
-				endcase
-		end
-endmodule
-module dispatcher (
-	clk,
-	rst,
-	num_blocks,
-	blockDim,
-	dispatch_en,
-	block_done,
-	core_start,
-	blockIdx_out,
-	kernel_done
-);
-	parameter NUM_CORES = 4;
-	parameter THREADS_PER_CORE = 4;
-	input wire clk;
-	input wire rst;
-	input wire [31:0] num_blocks;
+	input wire [4:0] r_addr1;
+	input wire [4:0] r_addr2;
+	input wire [4:0] r_addr3;
+	input wire [4:0] w_addr;
+	input wire [31:0] w_data;
+	input wire w_en;
+	input wire [31:0] threadIdx;
+	input wire [31:0] blockIdx;
 	input wire [31:0] blockDim;
-	input wire dispatch_en;
-	input wire [NUM_CORES - 1:0] block_done;
-	output reg [NUM_CORES - 1:0] core_start;
-	output reg [(NUM_CORES * 32) - 1:0] blockIdx_out;
-	output reg kernel_done;
-	reg [31:0] next_block;
-	reg [31:0] active_blocks;
-	reg assigned;
-	reg [31:0] done_count;
-	reg signed [31:0] delta;
+	output reg [31:0] r_data1;
+	output reg [31:0] r_data2;
+	output reg [31:0] r_data3;
+	reg [31:0] reg_file [0:31];
+	wire [31:0] r29_value;
+	assign r29_value = (blockDim == 32'd1 ? blockIdx : threadIdx);
 	always @(posedge clk or posedge rst)
-		if (rst) begin
-			next_block <= 0;
-			active_blocks <= 0;
-			kernel_done <= 0;
-			begin : sv2v_autoblock_1
-				reg signed [31:0] i;
-				for (i = 0; i < NUM_CORES; i = i + 1)
-					begin
-						core_start[i] <= 0;
-						blockIdx_out[i * 32+:32] <= 0;
-					end
-			end
+		if (rst) begin : sv2v_autoblock_1
+			reg signed [31:0] i;
+			for (i = 1; i < 29; i = i + 1)
+				reg_file[i] <= 32'b00000000000000000000000000000000;
 		end
-		else begin
-			done_count = 0;
-			delta = 0;
-			begin : sv2v_autoblock_2
-				reg signed [31:0] i;
-				for (i = 0; i < NUM_CORES; i = i + 1)
-					if (block_done[i]) begin
-						core_start[i] <= 0;
-						done_count = done_count + 1;
-						delta = delta - 1;
-					end
-			end
-			if (dispatch_en) begin
-				assigned = 0;
-				begin : sv2v_autoblock_3
-					reg signed [31:0] i;
-					for (i = 0; i < NUM_CORES; i = i + 1)
-						if (((!assigned && (core_start[i] == 0)) && (block_done[i] == 0)) && (next_block < num_blocks)) begin
-							core_start[i] <= 1;
-							blockIdx_out[i * 32+:32] <= next_block;
-							next_block <= next_block + 1;
-							delta = delta + 1;
-							assigned = 1;
-						end
-				end
-			end
-			active_blocks <= active_blocks + delta;
-			if (((next_block == num_blocks) && ((active_blocks + delta) == 0)) && (num_blocks > 0))
-				kernel_done <= 1;
+		else if (w_en) begin
+			if ((w_addr >= 1) && (w_addr <= 28))
+				reg_file[w_addr] <= w_data;
 		end
+	always @(*) begin : read_port_1
+		if (_sv2v_0)
+			;
+		case (r_addr1)
+			5'd0: r_data1 = 32'b00000000000000000000000000000000;
+			5'd29: r_data1 = r29_value;
+			5'd30: r_data1 = blockIdx;
+			5'd31: r_data1 = blockDim;
+			default: r_data1 = reg_file[r_addr1];
+		endcase
+	end
+	always @(*) begin : read_port_2
+		if (_sv2v_0)
+			;
+		case (r_addr2)
+			5'd0: r_data2 = 32'b00000000000000000000000000000000;
+			5'd29: r_data2 = r29_value;
+			5'd30: r_data2 = blockIdx;
+			5'd31: r_data2 = blockDim;
+			default: r_data2 = reg_file[r_addr2];
+		endcase
+	end
+	always @(*) begin : read_port_3
+		if (_sv2v_0)
+			;
+		case (r_addr3)
+			5'd0: r_data3 = 32'b00000000000000000000000000000000;
+			5'd29: r_data3 = r29_value;
+			5'd30: r_data3 = blockIdx;
+			5'd31: r_data3 = blockDim;
+			default: r_data3 = reg_file[r_addr3];
+		endcase
+	end
+	initial _sv2v_0 = 0;
 endmodule
 module scheduler (
 	clk,
@@ -839,384 +1141,82 @@ module scheduler (
 			endcase
 		end
 endmodule
-module fetcher (
+module dcr (
 	clk,
 	rst,
-	core_en,
-	pc_value,
-	instruction,
-	done,
-	req_valid,
-	req_addr,
-	resp_valid,
-	resp_data
-);
-	input wire clk;
-	input wire rst;
-	input wire core_en;
-	input wire [31:0] pc_value;
-	output reg [31:0] instruction;
-	output reg done;
-	output reg req_valid;
-	output reg [31:0] req_addr;
-	input wire resp_valid;
-	input wire [31:0] resp_data;
-	reg state;
-	always @(posedge clk or posedge rst)
-		if (rst) begin
-			state <= 1'b0;
-			instruction <= 32'b00000000000000000000000000000000;
-			req_valid <= 0;
-			req_addr <= 32'b00000000000000000000000000000000;
-			done <= 0;
-		end
-		else begin
-			req_valid <= 0;
-			done <= 0;
-			case (state)
-				1'b0:
-					if (core_en) begin
-						req_addr <= pc_value;
-						req_valid <= 1;
-						done <= 0;
-						state <= 1'b1;
-					end
-				1'b1:
-					if (resp_valid) begin
-						instruction <= resp_data;
-						done <= 1;
-						state <= 1'b0;
-					end
-				default:
-					;
-			endcase
-		end
-endmodule
-module decoder (
-	instruction,
-	opcode,
-	rd_addr,
-	rs1_addr,
-	rs2_addr,
-	rs3_addr,
-	imm,
-	nzp_mask,
-	sync_offset,
-	branch_offset,
-	sync_en,
-	ret,
-	write_back_en,
-	mem_read_en,
-	mem_write_en,
-	branch_en,
-	nzp_en
-);
-	reg _sv2v_0;
-	input wire [31:0] instruction;
-	output wire [5:0] opcode;
-	output wire [4:0] rd_addr;
-	output wire [4:0] rs1_addr;
-	output wire [4:0] rs2_addr;
-	output wire [4:0] rs3_addr;
-	output wire [15:0] imm;
-	output wire [2:0] nzp_mask;
-	output wire [10:0] sync_offset;
-	output wire [11:0] branch_offset;
-	output reg sync_en;
-	output reg ret;
-	output reg write_back_en;
-	output reg mem_read_en;
-	output reg mem_write_en;
-	output reg branch_en;
-	output reg nzp_en;
-	assign opcode = instruction[31:26];
-	assign rd_addr = instruction[25:21];
-	assign rs1_addr = instruction[20:16];
-	assign rs2_addr = instruction[15:11];
-	assign rs3_addr = instruction[10:6];
-	assign imm = instruction[15:0];
-	assign nzp_mask = instruction[25:23];
-	assign sync_offset = instruction[22:12];
-	assign branch_offset = instruction[11:0];
-	always @(*) begin
-		if (_sv2v_0)
-			;
-		ret = 1'b0;
-		write_back_en = 1'b0;
-		mem_read_en = 1'b0;
-		mem_write_en = 1'b0;
-		branch_en = 1'b0;
-		nzp_en = 1'b0;
-		sync_en = 1'b0;
-		case (opcode)
-			6'h00:
-				;
-			6'h01, 6'h02, 6'h03, 6'h04, 6'h05, 6'h06, 6'h07, 6'h08, 6'h09, 6'h0a, 6'h0b, 6'h0c, 6'h13, 6'h14: write_back_en = 1'b1;
-			6'h0d: nzp_en = 1'b1;
-			6'h0e: branch_en = 1'b1;
-			6'h0f: begin
-				mem_read_en = 1'b1;
-				write_back_en = 1'b1;
-			end
-			6'h10: mem_write_en = 1'b1;
-			6'h11: write_back_en = 1'b1;
-			6'h12: ret = 1'b1;
-			6'h15: sync_en = 1'b1;
-			default:
-				;
-		endcase
-	end
-	initial _sv2v_0 = 0;
-endmodule
-(* syn_dont_touch = 1 *) module alu (
-	operand1,
-	operand2,
-	operand3,
-	op_select,
-	result,
-	nzp_flag
-);
-	reg _sv2v_0;
-	input wire [31:0] operand1;
-	input wire [31:0] operand2;
-	input wire [31:0] operand3;
-	input wire [5:0] op_select;
-	output reg [31:0] result;
-	output reg [2:0] nzp_flag;
-	always @(*) begin
-		if (_sv2v_0)
-			;
-		result = 32'b00000000000000000000000000000000;
-		nzp_flag = 3'b000;
-		case (op_select)
-			6'h01: result = operand1 + operand2;
-			6'h02: result = operand1 - operand2;
-			6'h03: result = operand1 * operand2;
-			6'h04: result = operand1 / operand2;
-			6'h05: result = operand1 % operand2;
-			6'h06: result = operand1 << operand2;
-			6'h07: result = operand1 >> operand2;
-			6'h08: result = operand1 & operand2;
-			6'h09: result = operand1 | operand2;
-			6'h0a: result = operand1 ^ operand2;
-			6'h0b: result = ~operand1;
-			6'h0c: result = (operand1 * operand2) + operand3;
-			6'h0d: begin
-				result = 0;
-				nzp_flag = (($signed(operand1) - $signed(operand2)) == 0 ? 3'b010 : (($signed(operand1) - $signed(operand2)) > 0 ? 3'b001 : 3'b100));
-			end
-			6'h13: result = $signed(operand1) * $signed(operand2);
-			6'h14: result = $signed(operand1) >>> operand2;
-			default:
-				;
-		endcase
-	end
-	initial _sv2v_0 = 0;
-endmodule
-module lsu (
-	clk,
-	rst,
-	core_en,
-	done,
-	mem_data_address,
-	req_valid,
-	req_addr,
-	write_data,
-	resp_valid,
-	resp_data,
-	mem_write_en,
-	mem_write_data,
-	mem_read_en,
-	mem_read_data,
-	read_write_switch
-);
-	input wire clk;
-	input wire rst;
-	input wire core_en;
-	output reg done;
-	input wire [31:0] mem_data_address;
-	output reg req_valid;
-	output reg [31:0] req_addr;
-	output reg [31:0] write_data;
-	input wire resp_valid;
-	input wire [31:0] resp_data;
-	input wire mem_write_en;
-	input wire [31:0] mem_write_data;
-	input wire mem_read_en;
-	output reg [31:0] mem_read_data;
-	output reg read_write_switch;
-	reg is_read;
-	reg state;
-	always @(posedge clk or posedge rst)
-		if (rst) begin
-			req_valid <= 0;
-			req_addr <= 32'b00000000000000000000000000000000;
-			mem_read_data <= 32'b00000000000000000000000000000000;
-			done <= 0;
-			is_read <= 0;
-			state <= 1'b0;
-		end
-		else begin
-			req_valid <= 0;
-			req_addr <= 32'b00000000000000000000000000000000;
-			done <= 0;
-			case (state)
-				1'b0:
-					if (core_en) begin
-						if (mem_read_en) begin
-							is_read <= 1;
-							req_addr <= mem_data_address;
-							req_valid <= 1;
-							read_write_switch <= 1;
-							state <= 1'b1;
-						end
-						else if (mem_write_en) begin
-							is_read <= 0;
-							req_addr <= mem_data_address;
-							req_valid <= 1;
-							read_write_switch <= 0;
-							write_data <= mem_write_data;
-							state <= 1'b1;
-						end
-					end
-				1'b1:
-					if (is_read) begin
-						if (resp_valid) begin
-							mem_read_data <= resp_data;
-							done <= 1;
-							state <= 1'b0;
-						end
-					end
-					else if (resp_valid) begin
-						done <= 1;
-						state <= 1'b0;
-					end
-				default: state <= 1'b0;
-			endcase
-		end
-endmodule
-(* syn_dont_touch = 1 *) module pc (
-	clk,
-	rst,
-	block_rst,
-	pc_en,
-	branch_en,
-	branch_offset,
-	nzp_en,
-	nzp_flag,
-	nzp_mask,
-	pc_out,
-	nzp_out
-);
-	input wire clk;
-	input wire rst;
-	input wire block_rst;
-	input wire pc_en;
-	input wire branch_en;
-	input wire [11:0] branch_offset;
-	input wire nzp_en;
-	input wire [2:0] nzp_flag;
-	input wire [2:0] nzp_mask;
-	output reg [31:0] pc_out;
-	output wire [2:0] nzp_out;
-	reg [2:0] nzp_reg;
-	always @(posedge clk or posedge rst)
-		if (rst) begin
-			pc_out <= 32'b00000000000000000000000000000000;
-			nzp_reg <= 3'b000;
-		end
-		else if (block_rst) begin
-			pc_out <= 32'b00000000000000000000000000000000;
-			nzp_reg <= 3'b000;
-		end
-		else begin
-			if (nzp_en)
-				nzp_reg <= nzp_flag;
-			if (pc_en) begin
-				if (branch_en && ((nzp_reg & nzp_mask) != 0))
-					pc_out <= pc_out + branch_offset;
-				else
-					pc_out <= pc_out + 1;
-			end
-		end
-	assign nzp_out = nzp_reg;
-endmodule
-(* syn_dont_touch = 1 *) module registers (
-	clk,
-	rst,
-	r_addr1,
-	r_addr2,
-	r_addr3,
-	w_addr,
-	w_data,
-	w_en,
-	threadIdx,
-	blockIdx,
+	dcr_write_en,
+	dcr_addr,
+	dcr_data,
+	num_blocks,
 	blockDim,
-	r_data1,
-	r_data2,
-	r_data3
+	start
 );
-	reg _sv2v_0;
 	input wire clk;
 	input wire rst;
-	input wire [4:0] r_addr1;
-	input wire [4:0] r_addr2;
-	input wire [4:0] r_addr3;
-	input wire [4:0] w_addr;
-	input wire [31:0] w_data;
-	input wire w_en;
-	input wire [31:0] threadIdx;
-	input wire [31:0] blockIdx;
-	input wire [31:0] blockDim;
-	output reg [31:0] r_data1;
-	output reg [31:0] r_data2;
-	output reg [31:0] r_data3;
-	reg [31:0] reg_file [0:31];
-	wire [31:0] r29_value;
-	assign r29_value = (blockDim == 32'd1 ? blockIdx : threadIdx);
+	input wire dcr_write_en;
+	input wire [1:0] dcr_addr;
+	input wire [31:0] dcr_data;
+	output reg [31:0] num_blocks;
+	output reg [31:0] blockDim;
+	output reg start;
 	always @(posedge clk or posedge rst)
-		if (rst) begin : sv2v_autoblock_1
-			reg signed [31:0] i;
-			for (i = 1; i < 29; i = i + 1)
-				reg_file[i] <= 32'b00000000000000000000000000000000;
+		if (rst) begin
+			num_blocks <= 0;
+			blockDim <= 0;
+			start <= 0;
 		end
-		else if (w_en) begin
-			if ((w_addr >= 1) && (w_addr <= 28))
-				reg_file[w_addr] <= w_data;
+		else begin
+			start <= 0;
+			if (dcr_write_en)
+				case (dcr_addr)
+					2'b00: num_blocks <= dcr_data;
+					2'b01: blockDim <= dcr_data;
+					2'b10: start <= 1;
+				endcase
 		end
-	always @(*) begin : read_port_1
-		if (_sv2v_0)
-			;
-		case (r_addr1)
-			5'd0: r_data1 = 32'b00000000000000000000000000000000;
-			5'd29: r_data1 = r29_value;
-			5'd30: r_data1 = blockIdx;
-			5'd31: r_data1 = blockDim;
-			default: r_data1 = reg_file[r_addr1];
-		endcase
-	end
-	always @(*) begin : read_port_2
-		if (_sv2v_0)
-			;
-		case (r_addr2)
-			5'd0: r_data2 = 32'b00000000000000000000000000000000;
-			5'd29: r_data2 = r29_value;
-			5'd30: r_data2 = blockIdx;
-			5'd31: r_data2 = blockDim;
-			default: r_data2 = reg_file[r_addr2];
-		endcase
-	end
-	always @(*) begin : read_port_3
-		if (_sv2v_0)
-			;
-		case (r_addr3)
-			5'd0: r_data3 = 32'b00000000000000000000000000000000;
-			5'd29: r_data3 = r29_value;
-			5'd30: r_data3 = blockIdx;
-			5'd31: r_data3 = blockDim;
-			default: r_data3 = reg_file[r_addr3];
-		endcase
-	end
-	initial _sv2v_0 = 0;
+endmodule
+module warp_stack (
+	clk,
+	rst,
+	push,
+	push_sync_pc,
+	push_saved_mask,
+	pop,
+	top_sync_pc,
+	top_saved_mask,
+	stack_empty,
+	stack_full,
+	stack_overflow
+);
+	parameter THREADS_PER_CORE = 4;
+	parameter STACK_DEPTH = 4;
+	input wire clk;
+	input wire rst;
+	input wire push;
+	input wire [31:0] push_sync_pc;
+	input wire [THREADS_PER_CORE - 1:0] push_saved_mask;
+	input wire pop;
+	output wire [31:0] top_sync_pc;
+	output wire [THREADS_PER_CORE - 1:0] top_saved_mask;
+	output wire stack_empty;
+	output wire stack_full;
+	output wire stack_overflow;
+	reg [35:0] stack_mem [STACK_DEPTH - 1:0];
+	reg [2:0] sp;
+	assign stack_empty = sp == 0;
+	assign stack_full = sp == STACK_DEPTH;
+	assign stack_overflow = push && stack_full;
+	assign top_sync_pc = (sp > 0 ? stack_mem[sp - 1][35:4] : 32'b00000000000000000000000000000000);
+	assign top_saved_mask = (sp > 0 ? stack_mem[sp - 1][3:0] : {THREADS_PER_CORE {1'sb1}});
+	always @(posedge clk or posedge rst)
+		if (rst)
+			sp <= 0;
+		else begin
+			if (push && !stack_full) begin
+				stack_mem[sp] <= {push_sync_pc, push_saved_mask};
+				sp <= sp + 1;
+			end
+			if (pop && !stack_empty)
+				sp <= sp - 1;
+		end
 endmodule

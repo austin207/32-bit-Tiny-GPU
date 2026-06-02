@@ -584,7 +584,6 @@ inference.py:
 
 ## Known memory limitations
 
-```text
 - Data memory is modeled in cocotb, not implemented as final RTL SRAM/BRAM at top level.
 - Memory is word-addressed only.
 - No byte or halfword loads/stores.
@@ -594,7 +593,7 @@ inference.py:
 - Current data memory model returns 0 for missing addresses.
 - Program memory model returns RET for missing instruction addresses.
 - DIV/MOD are not recommended for synthesis demos.
-```
+
 
 ## Summary
 

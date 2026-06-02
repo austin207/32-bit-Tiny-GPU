@@ -502,7 +502,6 @@ assets/gds/gpu_layout.png
 
 ## Recommended Future Work
 
-```text
 1. Fix remaining Magic/KLayout DRC violations.
 2. Re-run OpenLane on the latest SIMT RTL if the current GDS was built from an older combined file.
 3. Keep DIV/MOD disabled until iterative units exist.
@@ -513,7 +512,6 @@ assets/gds/gpu_layout.png
 8. Add power numbers if available from reports.
 9. Add area breakdown by module if Yosys/OpenROAD reports are available.
 10. Add a short tapeout-readiness checklist.
-```
 
 ---
 

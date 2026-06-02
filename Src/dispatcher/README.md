@@ -162,7 +162,6 @@ always_ff @(posedge clk or posedge rst)
 
 A normal launch sequence is:
 
-```text
 1. DCR writes num_blocks.
 2. DCR writes blockDim.
 3. DCR emits start pulse.
@@ -172,7 +171,6 @@ A normal launch sequence is:
 7. Cores pulse block_done.
 8. Dispatcher clears completed cores and assigns more blocks if needed.
 9. Dispatcher asserts kernel_done when all blocks are complete.
-```
 
 ## Block assignment behavior
 
@@ -370,14 +368,12 @@ end
 
 The dispatcher assumes:
 
-```text
 - num_blocks is configured before dispatch_en is asserted.
 - blockDim is configured before dispatch_en is asserted.
 - dispatch_en remains high while the dispatcher is allowed to assign blocks.
 - block_done[i] is asserted by core i when its assigned block is complete.
 - core_start[i] can remain high while a core is active.
 - kernel_done is cleared only by reset.
-```
 
 ## Important implementation notes
 

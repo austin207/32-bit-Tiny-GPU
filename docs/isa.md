@@ -1191,7 +1191,6 @@ Memory[THREAD_IDX + 4] = R1
 
 ## Known ISA limitations
 
-```text
 - Fixed 32-bit instruction width
 - 6-bit opcode field
 - CONST only loads 16-bit zero-extended immediates
@@ -1203,7 +1202,6 @@ Memory[THREAD_IDX + 4] = R1
 - No vector register file
 - No explicit memory barriers
 - DIV/MOD are not synthesis-friendly in current form
-```
 
 ## Future ISA extension ideas
 

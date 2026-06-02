@@ -785,7 +785,7 @@ int main() {
 
 Program layout:
 
-```text
+```asm
 PC0: LDR   R1, THREAD_IDX, 0
 PC1: CMP   R1, R0
 PC2: BR P, sync_offset=2, branch_offset=2
@@ -1029,7 +1029,6 @@ axel_sync(&gpu);
 
 ## Current limitations
 
-```text
 - Maximum program length is 256 instructions.
 - Emit functions do not bounds-check the instruction buffer.
 - gpu_program_write silently returns if fopen fails.
@@ -1040,7 +1039,7 @@ axel_sync(&gpu);
 - No automatic branch-offset calculation.
 - No parser for assembly text yet.
 - AXEL kernels are written as C function calls, not textual assembly.
-```
+
 
 ---
 
@@ -1048,7 +1047,6 @@ axel_sync(&gpu);
 
 Useful future upgrades:
 
-```text
 - Add labels and automatic branch-offset resolution.
 - Add bounds checking for GPUProgram instructions.
 - Return error/status codes from gpu_program_write.
@@ -1059,7 +1057,6 @@ Useful future upgrades:
 - Add better build output checking in assembler Makefile.
 - Add unit tests for instruction encoders.
 - Add disassembler for debugging generated .hex files.
-```
 
 ---
 

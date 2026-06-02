@@ -491,12 +491,10 @@ SYNC_POP:
 
 The UPDATE state uses this priority:
 
-```text
 1. RET
 2. divergence_detected
 3. sync_en
 4. normal PC advance / next fetch
-```
 
 This means if multiple control signals are asserted at the same time:
 
@@ -608,7 +606,6 @@ end
 
 The scheduler assumes:
 
-```text
 - core_start is asserted when a core should begin a block.
 - fetcher_done pulses when instruction fetch completes.
 - decoder outputs are stable while the scheduler is deciding DECODE/UPDATE behavior.
@@ -617,7 +614,6 @@ The scheduler assumes:
 - sync_en is valid in UPDATE for SYNC instructions.
 - saved_mask is valid when entering SYNC_POP.
 - ret is valid in UPDATE for RET instructions.
-```
 
 ## Interaction with instruction latch
 

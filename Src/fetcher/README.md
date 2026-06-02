@@ -302,24 +302,20 @@ response:
 
 The current fetcher assumes:
 
-```text
 - req_addr is sampled by memory when req_valid is high.
 - resp_data is valid when resp_valid is high.
 - only one fetch request is outstanding at a time.
-```
 
 ## Timing assumptions
 
 The fetcher assumes:
 
-```text
 - `core_en` is asserted by the scheduler when a fetch should begin.
 - `pc_value` is valid when `core_en` is asserted.
 - Program memory samples `req_addr` when `req_valid` is high.
 - Program memory later returns `resp_valid` with the instruction on `resp_data`.
 - `resp_data` is valid in the same cycle as `resp_valid`.
 - The scheduler watches `done` to know fetch completion.
-```
 
 ## Reset behavior
 

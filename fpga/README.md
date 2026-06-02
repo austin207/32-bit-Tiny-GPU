@@ -1,4 +1,4 @@
-# FPGA Build — Sipeed Tang Nano 20K
+# FPGA Build: Sipeed Tang Nano 20K
 
 ## Overview
 
@@ -626,7 +626,7 @@ FPGA build              -> sequential execution across blocks
 
 ## Current Limitations
 
-```text
+
 - FPGA build uses 1 core and 1 thread for area reasons.
 - It does not exercise full 4-core × 4-thread parallel SIMT hardware.
 - Full warp-stack divergence is not meaningfully stressed when THREADS_PER_CORE = 1.
@@ -635,13 +635,13 @@ FPGA build              -> sequential execution across blocks
 - No full runtime driver exists yet.
 - UART output is simple debug text, not a structured protocol.
 - Timing/resource numbers should be updated after each Gowin build.
-```
+
 
 ---
 
 ## Recommended Future Work
 
-```text
+
 1. Add exact Gowin utilization report.
 2. Add Fmax/timing report.
 3. Add screenshots of Gowin synthesis/place-route success.
@@ -652,7 +652,6 @@ FPGA build              -> sequential execution across blocks
 8. Add a small host-side UART parser for output values.
 9. Add BRAM-based program/data memory with cleaner initialization.
 10. Add switches/buttons for selecting kernels or restarting execution.
-```
 
 ---
 

@@ -860,7 +860,6 @@ This fixed LDR writeback.
 
 The core assumes:
 
-```text
 - `core_start` pulses when dispatcher assigns a block.
 - Program memory returns valid instruction data when `prog_mem_resp_valid` is asserted.
 - Data memory returns valid read data when `data_mem_resp_valid` is asserted.
@@ -868,7 +867,6 @@ The core assumes:
 - Only active threads issue LSU requests, write registers, or advance PC.
 - The decoder output remains stable because the fetched instruction is latched.
 - The scheduler controls the legal timing for fetch, memory request, execute, update, divergence, and sync-pop.
-```
 
 ## Unit test
 
@@ -983,10 +981,8 @@ Important fixed bugs:
 
 The most important implementation details are:
 
-```text
 - fetched instructions are latched before decode
 - register writeback requires both scheduler and decoder write-enable
 - inactive threads are masked from LSU, PC, and register writeback
 - LSU response data uses packed 2D buses
 - divergence is detected from per-thread NZP branch decisions
-```

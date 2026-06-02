@@ -18,3 +18,8 @@ assembler/builds/weights.json
 
 # Generated build files
 assembler/builds/
+
+# logs, json, sv2v, build
+schematics/_build/
+schematics/logs/
+schematics/json/

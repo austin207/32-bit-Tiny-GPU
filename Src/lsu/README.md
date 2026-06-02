@@ -529,7 +529,6 @@ Then `LDR` writeback worked.
 
 The LSU assumes:
 
-```text
 - `core_en` is asserted only when the scheduler wants to begin a memory transaction.
 - `mem_read_en` and `mem_write_en` are stable when `core_en` is asserted.
 - Only one of `mem_read_en` or `mem_write_en` should be high for a valid transaction.
@@ -537,7 +536,6 @@ The LSU assumes:
 - `mem_write_data` is valid when a write transaction starts.
 - `resp_valid` means `resp_data` is valid in the same cycle for reads.
 - `done` is consumed as a one-cycle completion pulse by the core/scheduler path.
-```
 
 ## Reset behavior
 

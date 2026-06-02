@@ -21,7 +21,7 @@ The top-level module does not execute instructions directly. It coordinates laun
 
 ## RTL schematic
 
-![Top-Level GPU RTL schematic](../../assets/Images-Components/Top%20Level%20GPU-page-00001.jpg)
+![Top-Level GPU RTL schematic](../../assets/Images-Components/GPU-page-00001.jpg)
 
 If the image file has a different exact name, update the path above to match the file in `assets/Images-Components/`.
 
@@ -411,7 +411,6 @@ dut.dcr_data.value = 0
 
 The normal sequence is:
 
-```text
 1. Write num_blocks.
 2. Write blockDim.
 3. Write start command.
@@ -420,7 +419,6 @@ The normal sequence is:
 6. Cores execute.
 7. Cores assert block_done.
 8. Dispatcher asserts kernel_done.
-```
 
 ## Reset behavior
 
@@ -825,7 +823,6 @@ Each core receives:
 
 The top-level GPU assumes:
 
-```text
 - DCR writes occur synchronously through dcr_write_en/dcr_addr/dcr_data.
 - num_blocks and blockDim are written before start.
 - start is a one-cycle pulse from DCR.
@@ -834,7 +831,6 @@ The top-level GPU assumes:
 - program memory returns instruction data when prog_mem_resp_valid is high.
 - data memory returns response data when data_mem_resp_valid is high.
 - data_mem_resp_data is valid in the same cycle as data_mem_resp_valid.
-```
 
 ## Known pitfalls
 

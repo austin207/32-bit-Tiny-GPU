@@ -512,14 +512,12 @@ The taken path executes first for T0 and T2. At `SYNC`, the saved mask is restor
 
 The warp stack assumes:
 
-```text
 - push_sync_pc and push_saved_mask are valid when push is high.
 - pop is asserted only when the scheduler/core wants to restore a saved path.
 - push and pop are not asserted in the same cycle.
 - stack_overflow is observed externally if overflow detection is needed.
 - THREADS_PER_CORE remains 4 unless the hardcoded stack entry width is updated.
 - STACK_DEPTH remains compatible with the fixed 3-bit sp unless sp is parameterized later.
-```
 
 ## Verification
 
@@ -559,13 +557,11 @@ top_saved_mask = 4'b0101
 
 Sequence:
 
-```text
 1. Push one entry.
 2. Pop it.
 3. Confirm stack_empty = 1.
 4. Pop again while empty.
 5. Confirm stack_empty remains 1.
-```
 
 This proves empty-pop does not underflow.
 
@@ -573,13 +569,11 @@ This proves empty-pop does not underflow.
 
 Sequence:
 
-```text
 1. Push four entries into default depth-4 stack.
 2. Confirm stack_full = 1.
 3. Attempt fifth push.
 4. Confirm stack_overflow = 1.
 5. Confirm top entry remains the last valid entry.
-```
 
 Expected final top:
 

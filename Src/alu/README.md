@@ -41,14 +41,12 @@ thread_gen[i].alu_inst
 
 The ALU output is used by:
 
-```text
 - arithmetic instructions
 - logical instructions
 - FMA
 - signed multiply
 - arithmetic shift right
 - CMP / branch flag generation
-```
 
 ## Module declaration
 
@@ -268,12 +266,10 @@ The ALU is purely combinational.
 
 Assumptions:
 
-```text
 - Inputs are stable before the result is sampled.
 - There is no internal register or pipeline stage.
 - `result` and `nzp_flag` are valid after combinational propagation delay.
 - The scheduler/core controls when ALU outputs are used for writeback or NZP update.
-```
 
 In cocotb tests, a short timer delay is used after changing inputs:
 
@@ -308,13 +304,11 @@ The ALU is combinational, so the testbench does not start a clock.
 
 Each test:
 
-```text
 1. Clears operands and opcode.
 2. Applies new operands.
 3. Selects the opcode.
 4. Waits 1 ns.
 5. Checks `result` or `nzp_flag`.
-```
 
 Example:
 

@@ -230,13 +230,11 @@ After the start write, `dcr_write_en` is deasserted.
 
 The DCR assumes:
 
-```text
 - dcr_write_en, dcr_addr, and dcr_data are valid before the rising edge of clk.
 - num_blocks and blockDim are written before start is triggered.
 - start is consumed as a one-cycle pulse by the dispatcher.
 - dcr_data is ignored for the start command.
 - dcr_addr 2'b11 is currently unused.
-```
 
 ## Verification
 

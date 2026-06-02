@@ -408,13 +408,11 @@ The decoder is purely combinational.
 
 Assumptions:
 
-```text
 - `instruction` is stable before downstream control logic samples decoder outputs.
 - In `core.sv`, this is handled by the instruction latch.
 - Field outputs update whenever `instruction` changes.
 - Control outputs update whenever `opcode` changes.
 - No output is registered inside the decoder.
-```
 
 ## Important fixed core-level bug related to decoder stability
 
@@ -466,12 +464,10 @@ The decoder is combinational, so the testbench does not start a clock.
 
 Each test:
 
-```text
 1. Builds a 32-bit instruction word.
 2. Drives `dut.instruction`.
 3. Waits 1 ns for combinational propagation.
 4. Checks decoded fields and control signals.
-```
 
 Example:
 

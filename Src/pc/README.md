@@ -178,10 +178,8 @@ scheduler is IDLE and core_start is asserted -> reset thread PCs to 0
 
 When not in reset, the PC can perform two independent actions:
 
-```text
 1. Store NZP flag when nzp_en is high.
 2. Update PC when pc_en is high.
-```
 
 Current implementation:
 
@@ -377,10 +375,8 @@ This means the core fetches one instruction stream for the currently active set 
 
 During branch instructions, the PC contributes to divergence behavior in two ways:
 
-```text
 1. Each thread uses its stored nzp_reg to decide whether it takes the branch.
 2. Each active thread updates its own pc_out based on the branch decision.
-```
 
 The core separately computes `taken_mask` using `nzp_stored[i]`:
 
@@ -444,14 +440,12 @@ taken_mask = 4'b0101
 
 The PC assumes:
 
-```text
 - `pc_en` is asserted only when the scheduler wants the PC to update.
 - `branch_en`, `branch_offset`, and `nzp_mask` are stable when `pc_en` is asserted.
 - `nzp_flag` is stable when `nzp_en` is asserted.
 - CMP and BR are separate instructions.
 - Branch logic uses the stored NZP flag from a previous CMP.
 - `block_rst` is asserted at the start of a new block before normal instruction fetch continues.
-```
 
 ## Unit test
 
@@ -502,14 +496,12 @@ Checks that NZP can be stored without updating PC.
 
 Sequence:
 
-```text
 1. Increment PC to 1.
 2. Set nzp_en = 1 and nzp_flag = 3'b001.
 3. Keep pc_en = 0.
 4. Confirm PC remains 1.
 5. Branch on P with offset 5.
 6. Confirm PC becomes 6.
-```
 
 ## `test_branch_taken`
 

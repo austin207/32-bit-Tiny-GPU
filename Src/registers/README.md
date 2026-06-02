@@ -26,7 +26,7 @@ Only registers `R1` through `R28` are physically writable. Registers `R0`, `R29`
 
 ## RTL schematic
 
-![Register File RTL schematic](../../assets/Images-Components/Register%20File-page-00001.jpg)
+![Register File RTL schematic](../../assets/Images-Components/Register-page-00001.jpg)
 
 If the image file in `assets/Images-Components/` has a different name, update the path above to match the actual filename.
 
@@ -423,7 +423,6 @@ Each read port then maps `R0`, `R29`, `R30`, and `R31` specially and otherwise r
 
 The register file assumes:
 
-```text
 - Write inputs are stable before the rising edge of clk.
 - `w_en` is asserted only for instructions that should write registers.
 - Read addresses are stable before downstream logic samples read data.
@@ -431,7 +430,6 @@ The register file assumes:
 - Writes are synchronous.
 - Special registers are read-only.
 - Core logic gates `w_en` with `active_mask[i]` so inactive lanes do not write.
-```
 
 ## Read-after-write behavior
 
