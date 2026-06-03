@@ -22,7 +22,7 @@ saved_mask  -> active-mask value to restore later
 
 ## RTL schematic
 
-![Warp Stack RTL schematic](../../assets/Images-Components/Warp%20Stack-page-00001.jpg)
+![Warp Stack RTL schematic](../../assets/Images-Components/warp_stack_page-0001.jpg)
 
 If the actual image file uses a different name, update the path above to match the file in `assets/Images-Components/`.
 

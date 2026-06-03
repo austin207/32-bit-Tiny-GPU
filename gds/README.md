@@ -30,14 +30,14 @@ the round-robin memory controller, scheduler, dispatcher, and DCR.
 
 | File | Description |
 |---|---|
-| `gpu_simt_sky130a.gds` | SIMT GPU — primary GDS, KLayout-ready |
-| `gpu_simt_sky130a.magic.gds` | SIMT GPU — Magic-format GDS (use for DRC re-runs) |
-| `gpu_simt_sky130a.def` | SIMT GPU — post-route DEF |
-| `gpu_simd_sky130a.gds` | SIMD GPU — earlier baseline |
+| `gpu_simt_sky130a.gds` | SIMT GPU, primary GDS, KLayout-ready |
+| `gpu_simt_sky130a.magic.gds` | SIMT GPU, Magic-format GDS (use for DRC re-runs) |
+| `gpu_simt_sky130a.def` | SIMT GPU, post-route DEF |
+| `gpu_simd_sky130a.gds` | SIMD GPU, earlier baseline |
 | `metrics_simt.json` | Full OpenLane 2 metrics snapshot (SIMT run) |
 | `metrics_simt.csv` | Same metrics in CSV format |
-| `reports/lvs_simt.rpt` | LVS report — Netgen (SIMT) |
-| `reports/drc_violations.magic.rpt` | DRC report — Magic (SIMT, 0 violations) |
+| `reports/lvs_simt.rpt` | LVS report, Netgen (SIMT) |
+| `reports/drc_violations.magic.rpt` | DRC report, Magic (SIMT, 0 violations) |
 | `reports/gpu.drc` | Magic DRC output file (0 bytes = clean) |
 
 ---
@@ -99,7 +99,7 @@ Run: `RUN_2026-06-02_14-29-54`
 | Architecture | 1 thread/core | 4 threads/core + warp stack + round-robin arbiter |
 | Chip/die area | 1.977 mm² | 7.97 mm² |
 | Core utilization | n/a | 27.9% |
-| Logic cells | ~166K | 142,090 |
+| Total std cells | 204,938 | 300,884 |
 | Flip-flops | 16,138 | 19,202 |
 | LVS devices | 171,278 | 188,812 |
 | LVS result | Passed | Passed |
@@ -124,7 +124,7 @@ CTS:              passed
 Global routing:   passed
 Detailed routing: passed
 Magic DRC:        0 violations (clean)
-LVS:              passed — circuits match uniquely
+LVS:              passed, circuits match uniquely
 GDS generated:    yes
 ```
 
