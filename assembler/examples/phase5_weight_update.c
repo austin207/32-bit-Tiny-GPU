@@ -81,7 +81,8 @@ int main() {
     axel_str(&gpu, R14, R10, 3);
     axel_ret(&gpu);
 
-    axel_compile(&gpu, "phase5_weight_update.hex");
+    axel_compile(&gpu, "hex/phase5_weight_update.hex");
+    axel_compile_bin(&gpu, "bin/phase5_weight_update.axelbin");
 
     printf("Phase 5 — Weight update (Q8): %d instructions\n", gpu.program.count);
     for (int i = 0; i < gpu.program.count; i++)

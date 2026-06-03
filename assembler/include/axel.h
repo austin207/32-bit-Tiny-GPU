@@ -1,6 +1,9 @@
 #ifndef AXEL_H
 #define AXEL_H
 #include "gpu_asm.h"
+
+#define MAX_DATA_WORDS 256
+
 // 
 
 #define R0 0
@@ -48,6 +51,8 @@ typedef struct {
     GPUProgram program;
     int num_blocks;
     int threads_per_block;
+    uint32_t data_mem[MAX_DATA_WORDS];
+    int data_mem_size;
 } AxelGPU;
 
 void axel_init(AxelGPU *gpu, int num_blocks, int threads_per_block);
@@ -74,5 +79,7 @@ void axel_brnzp(AxelGPU *gpu, uint8_t nzp, uint32_t sync_offset, uint32_t branch
 void axel_nop(AxelGPU *gpu);
 void axel_ret(AxelGPU *gpu);
 void axel_sync(AxelGPU *gpu);
+void axel_set_data(AxelGPU *gpu, int addr, uint32_t value);
+int axel_compile_bin(AxelGPU *gpu, const char *filename);
 
 #endif

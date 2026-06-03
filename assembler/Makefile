@@ -3,6 +3,8 @@ CC     = gcc
 CFLAGS = -Wall -Iinclude
 SRCS   = src/axel.c src/gpu_asm.c
 BUILD  = builds
+HEX    = builds/hex
+BIN    = builds/bin
 
 .PHONY: all clean test_add test_axel phase1 phase2 phase3 phase4 phase5 phase6
 
@@ -10,6 +12,8 @@ all: phase1 phase2 phase3 phase4 phase5 phase6
 
 $(BUILD):
 	mkdir -p $(BUILD)
+	mkdir -p $(HEX)
+	mkdir -p $(BIN)
 
 test_add: $(BUILD)
 	$(CC) $(CFLAGS) examples/test_add.c $(SRCS) -o $(BUILD)/test_add

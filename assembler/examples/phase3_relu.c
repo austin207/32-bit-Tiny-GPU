@@ -34,7 +34,8 @@ int main() {
     axel_str(&gpu, R1, THREAD_IDX, 4);  /* mem[threadIdx + 4] = R1            */
     axel_ret(&gpu);
 
-    axel_compile(&gpu, "phase3_relu.hex");
+    axel_compile(&gpu, "hex/phase3_relu.hex");
+    axel_compile_bin(&gpu, "bin/phase3_relu.axelbin");
 
     printf("Phase 3 — ReLU: %d instructions\n", gpu.program.count);
     for (int i = 0; i < gpu.program.count; i++)

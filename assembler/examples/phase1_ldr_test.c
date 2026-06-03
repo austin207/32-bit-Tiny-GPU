@@ -25,7 +25,8 @@ int main() {
     axel_str(&gpu, R2, THREAD_IDX, 4);   /* mem[threadIdx + 4] = R2     */
     axel_ret(&gpu);
 
-    axel_compile(&gpu, "phase1_ldr_test.hex");
+    axel_compile(&gpu, "hex/phase1_ldr_test.hex");
+    axel_compile_bin(&gpu, "bin/phase1_ldr_test.axelbin");
 
     printf("Phase 1 — LDR test: %d instructions\n", gpu.program.count);
     for (int i = 0; i < gpu.program.count; i++)

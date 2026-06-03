@@ -48,7 +48,8 @@ int main() {
     axel_str(&gpu, R11, R12, 0);            /* mem[Y_BASE + i] = y[i]           */
     axel_ret(&gpu);
 
-    axel_compile(&gpu, "phase2_matmul.hex");
+    axel_compile(&gpu, "hex/phase2_matmul.hex");
+    axel_compile_bin(&gpu, "bin/phase2_matmul.axelbin");
 
     printf("Phase 2 — matmul: %d instructions\n", gpu.program.count);
     for (int i = 0; i < gpu.program.count; i++)

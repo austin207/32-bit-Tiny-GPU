@@ -1,12 +1,19 @@
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, Timer
-import os
+import os, sys
 import json
 
+# ─── axelbin loader ───────────────────────────────────────────────────────────
+# assembler/tools/axelbin.py is two levels up from Src/Top_level_GPU/
+_TOOLS_PATH = os.path.join(os.path.dirname(__file__), '../../assembler/tools')
+if _TOOLS_PATH not in sys.path:
+    sys.path.insert(0, _TOOLS_PATH)
+from axelbin import load_axelbin
+
 # ─── Training config ──────────────────────────────────────────────────────────
-FORWARD_HEX  = "../../assembler/builds/phase4_forward.hex"
-BACKWARD_HEX = "../../assembler/builds/phase5_weight_update.hex"
+FORWARD_HEX  = "../../assembler/builds/hex/phase4_forward.hex"
+BACKWARD_HEX = "../../assembler/builds/hex/phase5_weight_update.hex"
 WEIGHTS_FILE = "../../assembler/builds/weights.json"
 N_EPOCHS     = 20
 TIMEOUT_CYCLES = 10000
@@ -256,12 +263,9 @@ async def test_gpu_axel_program(dut):
     dut.prog_mem_resp_valid.value = 0
 
     for i in range(NUM_CORES):
-        # prog_mem_resp_data is still unpacked at top level.
         dut.prog_mem_resp_data[i].value = 0
 
     dut.data_mem_resp_valid.value = 0
-
-    # data_mem_resp_data is packed, so assign the whole bus at once.
     dut.data_mem_resp_data.value = 0
 
     cocotb.start_soon(program_memory_model(dut, instructions_ref))
@@ -317,31 +321,46 @@ async def test_gpu_axel_program(dut):
 
 @cocotb.test()
 async def test_simt_relu(dut):
+    """
+    SIMT ReLU — loaded from .axelbin binary.
+
+    The kernel binary embeds both instructions and initial data memory,
+    so no manual data_memory setup is needed here. The axelbin loader
+    provides num_blocks and blockDim directly from the binary header,
+    eliminating hardcoded DCR values in the testbench.
+    """
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
 
     base = os.path.dirname(__file__)
-    relu_hex = "../../assembler/builds/phase6_simt_relu.hex"
-    instructions = load_hex_file(os.path.join(base, relu_hex))
+    axelbin_path = os.path.join(base, "../../assembler/builds/bin/phase6_simt_relu.axelbin")
 
-    data_memory = {
-        0: 5,
-        1: 0xFFFFFFFD,
-        2: 8,
-        3: 0xFFFFFFFF,
-    }
+    # ── Load kernel binary ────────────────────────────────────────────────────
+    kernel = load_axelbin(axelbin_path)
 
+    # Instructions dict keyed by address (matches program_memory_model format)
+    instructions = {i: v for i, v in enumerate(kernel['instructions'])}
+
+    # Data memory seeded from binary — unsigned 32-bit for hardware
+    data_memory = {i: v for i, v in enumerate(kernel['data_mem_raw'])}
+
+    print(f"\n── axelbin loaded: {os.path.basename(axelbin_path)} ──")
+    print(f"  num_blocks : {kernel['num_blocks']}")
+    print(f"  blockDim   : {kernel['blockDim']}")
+    print(f"  instructions: {kernel['text_words']}")
+    print(f"  data words : {kernel['data_words']}")
+    print("  Initial data memory:")
+    for i, (raw, signed) in enumerate(zip(kernel['data_mem_raw'], kernel['data_mem'])):
+        print(f"    mem[{i}] = {raw:#010x}  ({signed})")
+
+    # ── Init DUT signals ──────────────────────────────────────────────────────
     dut.rst.value = 1
     dut.dcr_write_en.value = 0
-
     dut.prog_mem_resp_valid.value = 0
 
     for i in range(NUM_CORES):
-        # prog_mem_resp_data is still unpacked at top level.
         dut.prog_mem_resp_data[i].value = 0
 
     dut.data_mem_resp_valid.value = 0
-
-    # data_mem_resp_data is packed, so assign the whole bus at once.
     dut.data_mem_resp_data.value = 0
 
     instructions_ref = [instructions]
@@ -349,6 +368,7 @@ async def test_simt_relu(dut):
     cocotb.start_soon(program_memory_model(dut, instructions_ref))
     cocotb.start_soon(data_memory_model(dut, data_memory))
 
+    # ── Reset ─────────────────────────────────────────────────────────────────
     for _ in range(3):
         await RisingEdge(dut.clk)
 
@@ -356,21 +376,19 @@ async def test_simt_relu(dut):
     await RisingEdge(dut.clk)
     await Timer(1, unit="ns")
 
+    # ── DCR dispatch — values from binary header ──────────────────────────────
     dut.dcr_write_en.value = 1
 
-    # num_blocks = 1
     dut.dcr_addr.value = 0b00
-    dut.dcr_data.value = 1
+    dut.dcr_data.value = kernel['num_blocks']
     await RisingEdge(dut.clk)
     await Timer(1, unit="ns")
 
-    # blockDim = 4
     dut.dcr_addr.value = 0b01
-    dut.dcr_data.value = 4
+    dut.dcr_data.value = kernel['blockDim']
     await RisingEdge(dut.clk)
     await Timer(1, unit="ns")
 
-    # start pulse
     dut.dcr_addr.value = 0b10
     dut.dcr_data.value = 0
     await RisingEdge(dut.clk)
@@ -381,6 +399,7 @@ async def test_simt_relu(dut):
 
     dut.dcr_write_en.value = 0
 
+    # ── Wait for kernel completion ────────────────────────────────────────────
     for _ in range(TIMEOUT_CYCLES):
         await RisingEdge(dut.clk)
         await Timer(1, unit="ns")
@@ -390,6 +409,7 @@ async def test_simt_relu(dut):
 
     assert dut.kernel_done.value == 1, "Kernel never completed — hung"
 
+    # ── Assertions ────────────────────────────────────────────────────────────
     assert data_memory.get(4, None) == 5, (
         f"T0: expected 5, got {data_memory.get(4)}"
     )

@@ -72,7 +72,8 @@ int main() {
     axel_str  (&gpu, R11, R12, 0);          /* mem[Y_BASE + i] = y[i]     */
     axel_ret  (&gpu);
 
-    axel_compile(&gpu, "phase4_forward.hex");
+    axel_compile(&gpu, "hex/phase4_forward.hex");
+    axel_compile_bin(&gpu, "bin/phase4_forward.axelbin");
 
     printf("Phase 4 — Forward pass (Q8, SIMT ReLU): %d instructions\n",
            gpu.program.count);
