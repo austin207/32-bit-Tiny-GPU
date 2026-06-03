@@ -6,7 +6,7 @@ project:
   description: "A reduced Tiny Tapeout demo derived from a custom 32-bit SIMT GPU project with custom ISA, AXEL assembler, cocotb verification, FPGA targeting, and Sky130A GDS flow."
   language: "Verilog"
   clock_hz: 1000000
-  tiles: "8x2"
+  tiles: "1x1"
   top_module: "tt_um_austin207_tiny_gpu"
   source_files:
     - "project.v"
