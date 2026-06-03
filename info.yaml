@@ -1,0 +1,45 @@
+# Tiny Tapeout project information
+project:
+  title: "32-bit Tiny GPU Demo"
+  author: "Antony Austin"
+  discord: ""
+  description: "A reduced Tiny Tapeout demo derived from a custom 32-bit SIMT GPU project with custom ISA, AXEL assembler, cocotb verification, FPGA targeting, and Sky130A GDS flow."
+  language: "Verilog"
+  clock_hz: 1000000
+  tiles: "8x2"
+  top_module: "tt_um_austin207_tiny_gpu"
+  source_files:
+    - "project.v"
+
+pinout:
+  # Inputs
+  ui[0]: "start"
+  ui[1]: "reset_mode"
+  ui[2]: "debug_select_0"
+  ui[3]: "debug_select_1"
+  ui[4]: ""
+  ui[5]: ""
+  ui[6]: ""
+  ui[7]: ""
+
+  # Outputs
+  uo[0]: "done"
+  uo[1]: "result_0"
+  uo[2]: "result_1"
+  uo[3]: "result_2"
+  uo[4]: "result_3"
+  uo[5]: "heartbeat"
+  uo[6]: "debug"
+  uo[7]: "running"
+
+  # Bidirectional pins
+  uio[0]: ""
+  uio[1]: ""
+  uio[2]: ""
+  uio[3]: ""
+  uio[4]: ""
+  uio[5]: ""
+  uio[6]: ""
+  uio[7]: ""
+
+yaml_version: 6
