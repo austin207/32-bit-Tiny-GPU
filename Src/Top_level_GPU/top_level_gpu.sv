@@ -124,12 +124,16 @@ always_ff @(posedge clk or posedge rst) begin
         kc_running    <= 1'b0;
         kernel_cycles <= 32'b0;
     end else begin
-        if (start & ~kernel_done)
-            kc_running <= 1'b1;
-        if (kernel_done)
-            kc_running <= 1'b0;
-        if (kc_running & ~kernel_done)
+        if (start & ~kc_running & ~kernel_done) begin
+            kc_running    <= 1'b1;
+            kernel_cycles <= 32'b0;
+        end else if (kc_running & ~kernel_done) begin
             kernel_cycles <= kernel_cycles + 1;
+        end
+
+        if (kernel_done) begin
+            kc_running <= 1'b0;
+        end
     end
 end
 
