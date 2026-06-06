@@ -8,7 +8,7 @@ BIN    = builds/bin
 
 .PHONY: all clean test_add test_axel phase1 phase2 phase3 phase4 phase5 phase6
 
-all: phase1 phase2 phase3 phase4 phase5 phase6
+all: phase1 phase2 phase3 phase4 phase5 phase6 phase7
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -46,6 +46,10 @@ phase5: $(BUILD)
 phase6: $(BUILD)
 	$(CC) $(CFLAGS) examples/phase6_simt_relu.c $(SRCS) -o $(BUILD)/phase6
 	cd $(BUILD) && ./phase6
+
+phase7: $(BUILD)
+	$(CC) $(CFLAGS) examples/phase7_dot4_test.c $(SRCS) -o $(BUILD)/phase7
+	cd $(BUILD) && ./phase7
 
 clean:
 	rm -rf $(BUILD)

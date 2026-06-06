@@ -292,7 +292,6 @@ async def test_simt_relu(dut):
     _trace_csv   = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "trace_simt_relu.csv")
 
-    # ── Load kernel binary ────────────────────────────────────────────────────
     kernel       = load_axelbin(axelbin_path)
     instructions = {i: v for i, v in enumerate(kernel['instructions'])}
     data_memory  = {i: v for i, v in enumerate(kernel['data_mem_raw'])}
@@ -306,7 +305,6 @@ async def test_simt_relu(dut):
     for i, (raw, signed) in enumerate(zip(kernel['data_mem_raw'], kernel['data_mem'])):
         print(f"    mem[{i}] = {raw:#010x}  ({signed})")
 
-    # ── Init DUT signals ──────────────────────────────────────────────────────
     dut.rst.value          = 1
     dut.dcr_write_en.value = 0
     dut.prog_mem_resp_valid.value = 0
@@ -319,14 +317,12 @@ async def test_simt_relu(dut):
     cocotb.start_soon(program_memory_model(dut, instructions_ref))
     cocotb.start_soon(data_memory_model(dut, data_memory))
 
-    # ── Reset ─────────────────────────────────────────────────────────────────
     for _ in range(3):
         await RisingEdge(dut.clk)
     dut.rst.value = 0
     await RisingEdge(dut.clk)
     await Timer(1, unit="ns")
 
-    # ── DCR dispatch ──────────────────────────────────────────────────────────
     dut.dcr_write_en.value = 1
 
     dut.dcr_addr.value = 0b00
@@ -349,7 +345,6 @@ async def test_simt_relu(dut):
 
     dut.dcr_write_en.value = 0
 
-    # ── Grab core0 handle once — fail early with a clear message ─────────────
     try:
         _core0    = dut.core_gen[0].core_inst
         _trace_ok = True
@@ -357,7 +352,6 @@ async def test_simt_relu(dut):
         cocotb.log.warning(f"trace: core0 hierarchy failed ({e}), tracing disabled")
         _trace_ok = False
 
-    # ── Wait for kernel completion and collect trace inline ───────────────────
     trace_rows = []
 
     for _cyc in range(TIMEOUT_CYCLES):
@@ -391,7 +385,6 @@ async def test_simt_relu(dut):
         if dut.kernel_done.value == 1:
             break
 
-    # ── Write CSV ─────────────────────────────────────────────────────────────
     if trace_rows:
         with open(_trace_csv, "w", newline="") as _f:
             _w = csv.DictWriter(_f, fieldnames=trace_rows[0].keys())
@@ -401,7 +394,6 @@ async def test_simt_relu(dut):
     else:
         cocotb.log.error("trace: no rows collected")
 
-    # ── Assertions ────────────────────────────────────────────────────────────
     assert dut.kernel_done.value == 1, "Kernel never completed — hung"
 
     kc = safe_int(dut.kernel_cycles)
@@ -420,6 +412,110 @@ async def test_simt_relu(dut):
     print(f"  mem[5] = {data_memory.get(5)}  (T1: -3 -> zeroed) v")
     print(f"  mem[6] = {data_memory.get(6)}  (T2: +8 -> kept)   v")
     print(f"  mem[7] = {data_memory.get(7)}  (T3: -1 -> zeroed) v")
+
+
+@cocotb.test()
+async def test_dot4_kernel(dut):
+    """
+    DOT4 end-to-end kernel test.
+
+    Verifies the DOT4 instruction through the full GPU pipeline:
+    fetch, decode, register read, ALU, register writeback, LSU, memory.
+
+    Kernel: single thread computes dot([1,2,3,4], [1,2,3,4]) = 30
+    Memory layout:
+      mem[0] = 0x04030201  packed INT8x4 vec A = [1, 2, 3, 4]
+      mem[1] = 0x04030201  packed INT8x4 vec B = [1, 2, 3, 4]
+      mem[2] = result      expected 30
+    """
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+
+    base         = os.path.dirname(__file__)
+    axelbin_path = os.path.join(base, "../../assembler/builds/bin/phase7_dot4_test.axelbin")
+
+    kernel       = load_axelbin(axelbin_path)
+    instructions = {i: v for i, v in enumerate(kernel['instructions'])}
+    data_memory  = {i: v for i, v in enumerate(kernel['data_mem_raw'])}
+
+    # ── Python golden reference ───────────────────────────────────────────────
+    def unpack_int8x4(word):
+        lanes = []
+        for shift in [0, 8, 16, 24]:
+            byte = (word >> shift) & 0xFF
+            lanes.append(byte - 256 if byte >= 128 else byte)
+        return lanes
+
+    vec_a    = unpack_int8x4(data_memory[0])
+    vec_b    = unpack_int8x4(data_memory[1])
+    expected = sum(a * b for a, b in zip(vec_a, vec_b))
+
+    print(f"\n── DOT4 kernel ──")
+    print(f"  vec A = {vec_a}")
+    print(f"  vec B = {vec_b}")
+    print(f"  golden dot product = {expected}")
+
+    # ── Init DUT ──────────────────────────────────────────────────────────────
+    dut.rst.value          = 1
+    dut.dcr_write_en.value = 0
+    dut.prog_mem_resp_valid.value = 0
+    for i in range(NUM_CORES):
+        dut.prog_mem_resp_data[i].value = 0
+    dut.data_mem_resp_valid.value = 0
+    dut.data_mem_resp_data.value  = 0
+
+    instructions_ref = [instructions]
+    cocotb.start_soon(program_memory_model(dut, instructions_ref))
+    cocotb.start_soon(data_memory_model(dut, data_memory))
+
+    # ── Reset ─────────────────────────────────────────────────────────────────
+    for _ in range(3):
+        await RisingEdge(dut.clk)
+    dut.rst.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    # ── DCR dispatch (1 block, 1 thread) ──────────────────────────────────────
+    dut.dcr_write_en.value = 1
+
+    dut.dcr_addr.value = 0b00
+    dut.dcr_data.value = kernel['num_blocks']
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b01
+    dut.dcr_data.value = kernel['blockDim']
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b10
+    dut.dcr_data.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 0
+
+    # ── Wait for kernel completion ────────────────────────────────────────────
+    for _ in range(TIMEOUT_CYCLES):
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
+        if dut.kernel_done.value == 1:
+            break
+
+    assert dut.kernel_done.value == 1, "DOT4 kernel never completed — hung"
+
+    # ── Verify result ─────────────────────────────────────────────────────────
+    result = u32_to_signed(data_memory.get(2, 0))
+
+    print(f"  hardware result  = {result}")
+    print(f"  kernel_cycles    = {safe_int(dut.kernel_cycles)}")
+
+    assert result == expected, \
+        f"DOT4 kernel: expected {expected}, got {result}"
+
+    print(f"  DOT4 end-to-end: PASS (dot([1,2,3,4],[1,2,3,4]) = {result})")
 
 
 @cocotb.test()
