@@ -479,7 +479,6 @@ Detailed debug history: [`docs/debug_log.md`](docs/debug_log.md)
 
 ## Future Work
 
-- Update architecture diagram to show `warp_stack` and `mem_controller` inside core
 - Add execution trace logger (cycle-accurate per-thread instruction log)
 - Add Python AXEL runtime (kernel dispatch from host)
 - Implement AXEL-C compiler (C subset to AXEL assembly)
