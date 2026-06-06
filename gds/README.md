@@ -59,15 +59,19 @@ Run: `RUN_2026-06-02_14-29-54`
 | LVS devices matched | 188,812 |
 | LVS nets matched | 189,107 |
 | Target clock | 40 MHz (25 ns period) |
-| Achievable frequency | ~39.1 MHz (WNS = -547 ps, tt/25C/1.8V) |
+| Achievable frequency (TT) | **~32.9 MHz** (25°C / 1.80V, post-route SDF STA) |
+| Achievable frequency (SS) | **~18.6 MHz** (100°C / 1.60V, post-route SDF STA) |
+| Critical path | Core datapath mux tree, ~31 ns (a2111oi_2 + a31oi_2) |
 | Hold timing | Clean (WNS = 0) |
 | Magic DRC violations | **0** |
 | LVS result | **Circuits match uniquely** |
 | Tool flow | OpenLane 2.3.10 / OpenROAD |
 
-> **Timing note:** WNS reported at post-CTS STA (mid-PNR, step 35).
-> Post-route STA was not included in this flow run.
-> Achievable frequency derived as 1 / (25 ns + 0.547 ns) = 39.1 MHz.
+> **Timing note:** Post-route SDF-annotated STA was run using OpenSTA inside the
+> OpenLane 2 Docker container. False paths applied: `rst` port (async reset treated
+> as synchronous data by default) and `thread_keep_alive` port (synthetic XOR
+> reduction chain, not a functional timing path). STA scripts and full logs are in
+> [`../sta/`](../sta/).
 
 ---
 
@@ -104,8 +108,8 @@ Run: `RUN_2026-06-02_14-29-54`
 | LVS devices | 171,278 | 188,812 |
 | LVS result | Passed | Passed |
 | Magic DRC violations | 5 | **0** |
-| Timing WNS | +8.01 ns | -547 ps |
-| Achievable frequency | ~59 MHz | ~39.1 MHz |
+| Timing WNS | +8.01 ns | -5.40 ns (TT, post-route STA) |
+| Achievable frequency | ~59 MHz | ~32.9 MHz (TT) / ~18.6 MHz (SS) |
 
 The SIMT die is larger because the floorplan was sized conservatively
 (27.9% utilization) to ensure routing convergence on a consumer laptop.
@@ -118,14 +122,15 @@ A future tighter floorplan pass would reduce die area significantly.
 ### SIMT (current)
 
 ```
-Synthesis:        passed
-Placement:        passed
-CTS:              passed
-Global routing:   passed
-Detailed routing: passed
-Magic DRC:        0 violations (clean)
-LVS:              passed, circuits match uniquely
-GDS generated:    yes
+Synthesis:         passed
+Placement:         passed
+CTS:               passed
+Global routing:    passed
+Detailed routing:  passed
+Magic DRC:         0 violations (clean)
+LVS:               passed, circuits match uniquely
+Post-route STA:    completed (TT: ~32.9 MHz, SS: ~18.6 MHz)
+GDS generated:     yes
 ```
 
 ### SIMD (baseline)
@@ -152,7 +157,7 @@ The SIMT GPU is not a toy netlist.
 188,812 LVS-verified devices
 300,884 placed standard cells (including fill and tap)
 7.97 mm² die area
-~39.1 MHz achievable clock frequency
+~32.9 MHz achievable clock frequency (TT corner, post-route SDF STA)
 ```
 
 At this scale, routing runtime, memory pressure, OpenROAD stability,
@@ -263,6 +268,37 @@ Future work should implement these as iterative multi-cycle units.
 
 ---
 
+## Post-Route STA
+
+Post-route SDF-annotated timing analysis was run using OpenSTA inside the
+OpenLane 2 Docker container (`/nix/store/.../bin/sta`).
+
+Two SDF corners were analyzed:
+
+| Corner | Conditions | WNS | TNS | Achievable freq |
+|---|---|---|---|---|
+| TT | 25°C / 1.80V | -5.40 ns | -6828 ns | ~32.9 MHz |
+| SS | 100°C / 1.60V | -28.82 ns | -167428 ns | ~18.6 MHz |
+
+Critical path (both corners): `_344375_` (FF) to `_343054_` (FF) through
+a wide combinational mux tree. Dominated by two cells:
+
+- `sky130_fd_sc_hd__a2111oi_2`: 9.44 ns (TT) / 15.82 ns (SS)
+- `sky130_fd_sc_hd__a31oi_2`: 7.34 ns (TT) / 8.78 ns (SS)
+
+These two cells alone consume 16.8 ns of the 25 ns budget in TT.
+This is a Yosys synthesis artifact (wide mux mapped to complex compound gates
+instead of a balanced tree). A re-synthesis pass with size/area constraints
+targeting these specific cells would be the most direct fix.
+
+False paths applied:
+- `set_false_path -from [get_ports rst]` — async reset treated as synchronous data by default
+- `set_false_path -to [get_ports thread_keep_alive]` — synthetic XOR reduction chain
+
+STA scripts: [`../sta/sta_tt.tcl`](../sta/sta_tt.tcl), [`../sta/sta_ss.tcl`](../sta/sta_ss.tcl)
+
+---
+
 ## Toolchain
 
 | Tool | Version |
@@ -273,6 +309,7 @@ Future work should implement these as iterative multi-cycle units.
 | Place and route | OpenROAD / TritonRoute |
 | DRC | Magic |
 | LVS | Netgen |
+| STA | OpenSTA (inside OpenLane 2 container) |
 | PDK | sky130A |
 
 ---
@@ -393,14 +430,14 @@ Use native Ubuntu for OpenLane runs at this design scale.
 | GDS generated | Yes | Yes |
 | Magic DRC clean | No (5 violations) | **Yes (0 violations)** |
 | Antenna report | Not clean | Excluded from flow (Magic DRC clean) |
-| Post-route STA | Passed (WNS +8.01 ns) | Not run (WNS -547 ps mid-PNR) |
+| Post-route STA | Passed (WNS +8.01 ns) | **Done (TT: ~32.9 MHz, SS: ~18.6 MHz)** |
 | Power signoff | Not documented | Not documented |
 | DIV/MOD | Replaced with 32'b0 | Replaced with 32'b0 |
 | Run reproducible | Config archived | Config archived in this repo |
 | Tapeout-ready | No | Not yet |
 
-The SIMT layout is the strongest result achieved: 0 DRC violations, LVS clean.
-Remaining items before tapeout readiness: post-route STA pass and power signoff.
+The SIMT layout is the strongest result: 0 DRC violations, LVS clean, post-route STA complete.
+Remaining items before tapeout readiness: power signoff and critical path improvement.
 
 ---
 
@@ -425,8 +462,7 @@ Native Ubuntu eliminated all stability issues.
 ### 4. Explicit `meta.flow` gives fine-grained step control
 
 Excluding a crashing step (antenna checker) by omitting it from `meta.flow`
-is cleaner than fighting OpenLane 1-style `RUN_*` variables, which OpenLane 2
-may not fully honor.
+is cleaner than fighting OpenLane 1-style `RUN_*` variables.
 
 ### 5. Single-threaded detailed routing is slower but stable
 
@@ -439,16 +475,22 @@ Single-cycle combinational dividers are not suitable for ASIC implementation
 at this process node and design scale. Future versions should implement these
 as multi-cycle iterative units.
 
+### 7. Mid-PNR WNS estimates are optimistic
+
+The mid-PNR WNS of -547 ps implied ~39.1 MHz. Post-route SDF-annotated STA
+on the final netlist gave -5.40 ns WNS and ~32.9 MHz. Always run post-route STA
+before quoting a frequency number.
+
 ---
 
 ## Recommended Future Work
 
-1. Run post-route STA to get accurate final timing numbers.
-2. Tighten floorplan (raise `FP_CORE_UTIL`) to reduce die area from 7.97 mm².
+1. Tighten floorplan (raise `FP_CORE_UTIL`) to reduce die area from 7.97 mm².
+2. Re-synthesize with constraints targeting the a2111oi/a31oi critical path to improve frequency.
 3. Implement DIV/MOD as iterative multi-cycle hardware units.
 4. Add power analysis from OpenROAD reports.
 5. Add area breakdown by module from Yosys/OpenROAD hierarchy reports.
-6. Re-run antenna checker with correct config once the root cause is known.
+6. Re-run antenna checker with correct config once root cause is known.
 7. Add final KLayout screenshot of SIMT layout to `assets/gds/`.
 
 ---
@@ -463,6 +505,7 @@ as multi-cycle iterative units.
 | Memory map | `../docs/memory_map.md` |
 | Debug log | `../docs/debug_log.md` |
 | FPGA documentation | `../fpga/README.md` |
+| Post-route STA scripts | `../sta/` |
 | Reports folder | `../reports/` |
 
 ---
@@ -478,7 +521,7 @@ SIMT result:
 ```
 188,812 LVS-verified devices
 7.97 mm² die area
-~39.1 MHz achievable frequency
+~32.9 MHz achievable frequency (TT corner, post-route SDF STA)
 0 Magic DRC violations
 LVS: circuits match uniquely
 ```

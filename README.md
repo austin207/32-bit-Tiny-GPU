@@ -15,8 +15,12 @@ and a full RTL-to-GDSII run on SkyWater Sky130A via OpenLane 2.
 RTL simulation:      47/47 tests passing
 Top-level GPU test:  PASSING
 SIMT ReLU test:      PASSING
+Execution trace:     cycle-accurate CSV logger integrated
+Kernel cycle counter: hardware 32-bit counter on kernel_cycles port
+PyAXEL runtime:      cocotb subprocess backend, smoke test passing
 FPGA target:         Tang Nano 20K (wrapper updated, flash pending)
 ASIC flow:           Sky130A GDS, 0 DRC violations, LVS passed
+Post-route STA:      32.9 MHz (TT), 18.6 MHz (SS)
 ```
 
 Key verified regression: Phase 6 SIMT ReLU:
@@ -81,6 +85,7 @@ Full architecture details: [`docs/architecture.md`](docs/architecture.md)
 | AXEL assembler | [`assembler/README.md`](assembler/README.md) |
 | FPGA build | [`fpga/README.md`](fpga/README.md) |
 | OpenLane / GDS | [`gds/README.md`](gds/README.md) |
+| Post-route STA | [`sta/`](sta/) |
 
 ---
 
@@ -295,7 +300,7 @@ cd Src/Top_level_GPU
 make
 ```
 
-Run only SIMT ReLU:
+Run only SIMT ReLU (also writes trace_simt_relu.csv):
 
 ```bash
 cd Src/Top_level_GPU
@@ -383,11 +388,14 @@ The GPU has been taken through the full RTL-to-GDSII flow twice.
 | Standard cell library | sky130_fd_sc_hd |
 | Die area | 7.97 mm² (~2.82 x 2.82 mm) |
 | Core utilization | 27.9% |
+| Total std cells | 300,884 |
 | LVS devices matched | 188,812 |
 | LVS nets matched | 189,107 |
-| Achievable frequency | ~39.1 MHz (WNS = -547 ps) |
 | Magic DRC violations | **0** |
 | LVS result | **Circuits match uniquely** |
+| Achievable frequency (TT) | **~32.9 MHz** (25°C / 1.80V, post-route SDF STA) |
+| Achievable frequency (SS) | **~18.6 MHz** (100°C / 1.60V, post-route SDF STA) |
+| Critical path | Core datapath mux tree (~31 ns, a2111oi + a31oi) |
 | Tool | OpenLane 2.3.10 |
 
 ### SIMD (baseline)
@@ -399,6 +407,8 @@ The GPU has been taken through the full RTL-to-GDSII flow twice.
 | Worst setup slack | +8.01 ns (~59 MHz) |
 | Magic DRC violations | 5 |
 | LVS result | Passed |
+
+Post-route STA scripts and logs: [`sta/`](sta/)
 
 Full GDS documentation: [`gds/README.md`](gds/README.md)
 
@@ -445,8 +455,17 @@ Detailed debug history: [`docs/debug_log.md`](docs/debug_log.md)
 │   ├── gpu_simd_sky130a.gds
 │   ├── metrics_simt.json
 │   └── reports/
+├── pyaxel/
+│   ├── __init__.py
+│   ├── gpu.py
+│   └── README.md
 ├── reports/
 ├── schematics/
+├── sta/
+│   ├── sta_tt.tcl            (TT corner STA script)
+│   ├── sta_ss.tcl            (SS corner STA script)
+│   ├── sta_tt.log            (TT corner results)
+│   └── sta_ss.log            (SS corner results)
 └── Src/
     ├── alu/
     ├── core/
@@ -473,21 +492,21 @@ Detailed debug history: [`docs/debug_log.md`](docs/debug_log.md)
 - `CONST` loads a 16-bit zero-extended immediate only. No sign-extension variant.
 - `DIV` and `MOD` are replaced with `32'b0` in the synthesis target (no hardware divider on Sky130A).
 - `kernel_done` is sticky until reset. Repeated kernel launches require a full reset cycle.
-- Architecture diagram needs an update to show `warp_stack` and `mem_controller` inside each core.
+- Critical path is a wide mux tree through `a2111oi_2` and `a31oi_2` cells, limiting TT frequency to ~32.9 MHz. A floorplan re-run with tighter placement constraints is planned.
 
 ---
 
 ## Future Work
 
-- Add execution trace logger (cycle-accurate per-thread instruction log)
-- Add Python AXEL runtime (kernel dispatch from host)
+- Tighten floorplan to reduce 7.97 mm² die area and improve critical path
 - Implement AXEL-C compiler (C subset to AXEL assembly)
 - Flash and verify FPGA SIMT build on Tang Nano 20K
-- Run post-route STA for accurate final timing numbers
-- Tighten floorplan to reduce 7.97 mm² die area
 - Implement DIV/MOD as iterative multi-cycle hardware units
 - UVM verification suite
 - Cadence Genus/Xcelium synthesis (pending lab access)
+- Phase 1: AI ISA extensions (DOT4, RELU, CLAMP, ARGMAX)
+- Phase 2: Q8 neural network inference on GPU
+- Phase 4: Memory-mapped matmul accelerator
 
 ---
 
