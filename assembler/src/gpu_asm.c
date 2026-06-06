@@ -88,6 +88,22 @@ void emit_imul(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2) {
     prog->instructions[prog->count++] = encode_r(OP_IMUL, rd, rs1, rs2, 0);
 }
 
+void emit_dot(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    prog->instructions[prog->count++] = encode_r(OP_DOT, rd, rs1, rs2, rd);
+}
+
+void emit_relu(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    prog->instructions[prog->count++] = encode_r(OP_RELU, rd, rs1, rs2, 0);
+}
+
+void emit_clamp(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    prog->instructions[prog->count++] = encode_r(OP_CLAMP, rd, rs1, rs2, 0);
+}
+
+void emit_max(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    prog->instructions[prog->count++] = encode_r(OP_MAX, rd, rs1, rs2, 0);
+}
+
 void emit_ldr(GPUProgram *prog, uint8_t rd, uint8_t rs, uint16_t imm) {
     prog->instructions[prog->count++] = encode_i(OP_LDR, rd, rs, imm); 
 }

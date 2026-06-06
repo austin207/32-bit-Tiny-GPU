@@ -49,7 +49,8 @@ module decoder (
             6'h01, 6'h02, 6'h03, 6'h04,
             6'h05, 6'h06, 6'h07, 6'h08,
             6'h09, 6'h0A, 6'h0B, 6'h0C,
-            6'h13, 6'h14: begin
+            6'h13, 6'h14, 6'h16, 6'h17, 
+            6'h18, 6'h19: begin
                 write_back_en = 1'b1;
             end
 

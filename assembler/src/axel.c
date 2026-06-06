@@ -75,6 +75,22 @@ void axel_fma(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2, uint8_t rs3) {
     emit_fma(&gpu->program, rd, rs1, rs2, rs3);
 }
 
+void axel_dot(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    emit_dot(&gpu->program, rd, rs1, rs2);
+}
+
+void axel_relu(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    emit_relu(&gpu->program, rd, rs1, rs2);
+}
+
+void axel_clamp(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    emit_clamp(&gpu->program, rd, rs1, rs2);
+}
+
+void axel_max(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    emit_max(&gpu->program, rd, rs1, rs2);
+}
+
 void axel_ldr(AxelGPU *gpu, uint8_t rd, uint8_t rs, uint16_t imm) {
     emit_ldr(&gpu->program, rd, rs, imm);
 }
