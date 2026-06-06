@@ -90,15 +90,27 @@ always_ff @(posedge clk or posedge rst) begin
 end
 
 // ── LSU done latch ───────────────────────────────────────────────────────────
+// IMPORTANT:
+// lsu_done_latch must be cleared before every new memory instruction.
+// Clearing only on lsu_en is too late for back-to-back LDRs: the scheduler can
+// see stale all-done bits from the previous LDR and leave WAIT early.
+//
+// We clear when a newly fetched instruction is a LOAD/STORE, using
+// instruction_raw because instruction is updated from instruction_raw on the
+// same clock edge.
 always_ff @(posedge clk or posedge rst) begin
     if (rst) begin
         lsu_done_latch <= '0;
     end else begin
-        if (lsu_en) begin
-            // New memory operation starting — clear all latches
+        if (done && ((instruction_raw[31:26] == 6'h0F) ||
+                     (instruction_raw[31:26] == 6'h10))) begin
+            // New LDR/STR fetched: clear stale completion bits immediately.
+            lsu_done_latch <= '0;
+        end else if (lsu_en) begin
+            // Memory request launch: also clear defensively.
             lsu_done_latch <= '0;
         end else begin
-            // Accumulate: once a thread fires done, hold it high
+            // Accumulate completions from the active memory instruction.
             for (int i = 0; i < THREADS_PER_CORE; i++) begin
                 if (lsu_done_raw[i]) begin
                     lsu_done_latch[i] <= 1'b1;
