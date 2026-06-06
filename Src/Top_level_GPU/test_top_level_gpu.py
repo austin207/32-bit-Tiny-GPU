@@ -404,6 +404,12 @@ async def test_simt_relu(dut):
     # ── Assertions ────────────────────────────────────────────────────────────
     assert dut.kernel_done.value == 1, "Kernel never completed — hung"
 
+    kc = safe_int(dut.kernel_cycles)
+    cocotb.log.info(f"kernel_cycles = {kc}  (trace captured {len(trace_rows)} rows)")
+    assert kc > 0, f"kernel_cycles is 0 — counter not running"
+    assert abs(kc - len(trace_rows)) <= 2, \
+        f"kernel_cycles {kc} too far from trace row count {len(trace_rows)}"
+
     assert data_memory.get(4, None) == 5,  f"T0: expected 5, got {data_memory.get(4)}"
     assert data_memory.get(5, None) == 0,  f"T1: expected 0, got {data_memory.get(5)}"
     assert data_memory.get(6, None) == 8,  f"T2: expected 8, got {data_memory.get(6)}"

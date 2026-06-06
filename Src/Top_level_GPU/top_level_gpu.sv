@@ -10,7 +10,7 @@ module gpu #(
     input  logic [1:0]  dcr_addr,
     input  logic [31:0] dcr_data,
     output logic        kernel_done,
-
+    output logic [31:0] kernel_cycles, 
     output logic [31:0] thread_keep_alive,
 
     output logic [NUM_CORES-1:0]       prog_mem_req_valid,
@@ -30,6 +30,8 @@ module gpu #(
 logic [31:0] num_blocks;
 logic [31:0] blockDim;
 logic start;
+// ── Kernel cycle counter ──────────────────────────────────────────────────────
+logic        kc_running;
 logic [NUM_CORES-1:0]       core_start;
 logic [NUM_CORES-1:0][31:0] blockIdx_out;
 logic [NUM_CORES-1:0]       block_done;
@@ -112,5 +114,23 @@ generate
     end
 endgenerate
 assign thread_keep_alive = _top_keep_xor[NUM_CORES];
+
+// ── Kernel cycle counter ──────────────────────────────────────────────────────
+// kc_running sets on the start pulse and clears when kernel_done asserts.
+// kernel_cycles increments every cycle while running.
+// Both reset to 0 on rst so back-to-back launches restart cleanly.
+always_ff @(posedge clk or posedge rst) begin
+    if (rst) begin
+        kc_running    <= 1'b0;
+        kernel_cycles <= 32'b0;
+    end else begin
+        if (start & ~kernel_done)
+            kc_running <= 1'b1;
+        if (kernel_done)
+            kc_running <= 1'b0;
+        if (kc_running & ~kernel_done)
+            kernel_cycles <= kernel_cycles + 1;
+    end
+end
 
 endmodule
