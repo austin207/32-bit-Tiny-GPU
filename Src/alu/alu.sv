@@ -31,9 +31,14 @@ always_comb begin
        6'h0B : result = ~operand1; //NOT
        6'h0C : result = (operand1 * operand2) + operand3; //FMA
        6'h0D : begin
-        result = 0;
-        nzp_flag = ($signed(operand1) - $signed(operand2)) == 0 ? 3'b010 : ($signed(operand1) - $signed(operand2)) > 0 ? 3'b001 : 3'b100;
-       end 
+            result = 32'b0;
+            if ($signed(operand1) == $signed(operand2))
+                nzp_flag = 3'b010;
+            else if ($signed(operand1) > $signed(operand2))
+                nzp_flag = 3'b001;
+            else
+                nzp_flag = 3'b100;
+        end //CMP
        6'h13 : result = $signed(operand1) * $signed(operand2); // IMUL
        6'h14 : result = $signed(operand1) >>> operand2; // SAR
        6'h16 : result = $signed(operand3) + dot_p0 + dot_p1 + dot_p2 + dot_p3; //DOT4
