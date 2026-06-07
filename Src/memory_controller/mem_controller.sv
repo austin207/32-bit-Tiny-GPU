@@ -82,14 +82,21 @@ assign scan_valid = pending | req_valid;
 // ── Round-robin scan ──────────────────────────────────────────────────────────
 logic [PTR_W-1:0] next_thread;
 logic             found;
+integer           scan_idx;
 
 always_comb begin
     next_thread = '0;
     found       = 1'b0;
+    scan_idx    = 0;
 
     for (int j = 0; j < THREADS_PER_CORE; j++) begin
-        if (!found && scan_valid[PTR_W'(rr_ptr + j)]) begin
-            next_thread = PTR_W'(rr_ptr + j);
+        scan_idx = rr_ptr + j;
+
+        if (scan_idx >= THREADS_PER_CORE)
+            scan_idx = scan_idx - THREADS_PER_CORE;
+
+        if (!found && scan_valid[scan_idx]) begin
+            next_thread = scan_idx;
             found       = 1'b1;
         end
     end
