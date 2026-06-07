@@ -6,9 +6,9 @@ BUILD  = builds
 HEX    = builds/hex
 BIN    = builds/bin
 
-.PHONY: all clean test_add test_axel phase1 phase2 phase3 phase4 phase5 phase6 phase7 phase8
+.PHONY: all clean test_add test_axel phase1 phase2 phase3 phase4 phase5 phase6 phase7 phase8 phase9_single phase9_broadcast phase10 phase11 phase12
 
-all: phase1 phase2 phase3 phase4 phase5 phase6 phase7 phase8
+all: phase1 phase2 phase3 phase4 phase5 phase6 phase7 phase8 phase9_single phase9_broadcast phase10 phase11 phase12
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -54,6 +54,26 @@ phase7: $(BUILD)
 phase8: $(BUILD)
 	$(CC) $(CFLAGS) examples/phase8_mlp_inference.c $(SRCS) -o $(BUILD)/phase8
 	cd $(BUILD) && ./phase8
+
+phase9_single: $(BUILD)
+	$(CC) $(CFLAGS) examples/phase9_ldr_regbase_single.c $(SRCS) -o $(BUILD)/phase9_single
+	cd $(BUILD) && ./phase9_single
+
+phase9_broadcast: $(BUILD)
+	$(CC) $(CFLAGS) examples/phase9_ldr_regbase_broadcast.c $(SRCS) -o $(BUILD)/phase9_broadcast
+	cd $(BUILD) && ./phase9_broadcast
+
+phase10: $(BUILD)
+	$(CC) $(CFLAGS) examples/phase10_mlp_8out.c $(SRCS) -o $(BUILD)/phase10
+	cd $(BUILD) && ./phase10
+
+phase11: $(BUILD)
+	$(CC) $(CFLAGS) examples/phase11_mlp_8in.c $(SRCS) -o $(BUILD)/phase11
+	cd $(BUILD) && ./phase11
+
+phase12: $(BUILD)
+	$(CC) $(CFLAGS) examples/phase12_mlp_q6.c $(SRCS) -o $(BUILD)/phase12
+	cd $(BUILD) && ./phase12
 
 clean:
 	rm -rf $(BUILD)

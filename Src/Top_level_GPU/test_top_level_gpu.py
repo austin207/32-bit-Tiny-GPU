@@ -809,6 +809,293 @@ async def test_ldr_regbase_broadcast(dut):
 
     assert all_pass, "test_ldr_regbase_broadcast: one or more threads got wrong data"
 
+# ─── Append these three functions to the bottom of test_top_level_gpu.py ─────
+
+
+@cocotb.test()
+async def test_mlp_8out(dut):
+    """
+    Config B: 4-in -> 8-out MLP layer.
+
+    First multi-block kernel exercising correctness (not just completion).
+    Two blocks dispatch: block 0 -> neurons 0-3, block 1 -> neurons 4-7.
+    neuron_id = BLOCK_IDX * 4 + THREAD_IDX
+
+    Also exercises GP-register base LDR (R9 = 8, x loaded via R9+0).
+
+    Expected at mem[12..19]: [16, 37, 36, 15, 30, 0, 41, 0]
+    """
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+
+    base         = os.path.dirname(__file__)
+    axelbin_path = os.path.join(
+        base, "../../assembler/builds/bin/phase10_mlp_8out.axelbin"
+    )
+
+    kernel       = load_axelbin(axelbin_path)
+    instructions = {i: v for i, v in enumerate(kernel["instructions"])}
+    data_memory  = {i: v for i, v in enumerate(kernel["data_mem_raw"])}
+
+    EXPECTED = {
+        12: 16, 13: 37, 14: 36, 15: 15,
+        16: 30, 17:  0, 18: 41, 19:  0,
+    }
+
+    print("\n── Config B: 4-in -> 8-out, 2 blocks ──")
+    print(f"  num_blocks={kernel['num_blocks']}  blockDim={kernel['blockDim']}")
+    print(f"  expected y[0..7] = {[EXPECTED[k] for k in sorted(EXPECTED)]}")
+
+    dut.rst.value          = 1
+    dut.dcr_write_en.value = 0
+    dut.prog_mem_resp_valid.value = 0
+    for i in range(NUM_CORES):
+        dut.prog_mem_resp_data[i].value = 0
+    dut.data_mem_resp_valid.value = 0
+    dut.data_mem_resp_data.value  = 0
+
+    instructions_ref = [instructions]
+    cocotb.start_soon(program_memory_model(dut, instructions_ref))
+    cocotb.start_soon(data_memory_model(dut, data_memory))
+
+    for _ in range(3):
+        await RisingEdge(dut.clk)
+    dut.rst.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 1
+
+    dut.dcr_addr.value = 0b00
+    dut.dcr_data.value = kernel["num_blocks"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b01
+    dut.dcr_data.value = kernel["blockDim"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b10
+    dut.dcr_data.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 0
+
+    for _ in range(TIMEOUT_CYCLES):
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
+        if dut.kernel_done.value == 1:
+            break
+
+    assert dut.kernel_done.value == 1, \
+        "test_mlp_8out: kernel never completed — hung"
+
+    print("\n── Results ──")
+    all_pass = True
+    for addr, exp in sorted(EXPECTED.items()):
+        got    = u32_to_signed(data_memory.get(addr, 0))
+        status = "PASS" if got == exp else "FAIL"
+        neuron = addr - 12
+        print(f"  y[{neuron}] mem[{addr}] = {got:4d}  (expected {exp:4d})  {status}")
+        if got != exp:
+            all_pass = False
+
+    kc = safe_int(dut.kernel_cycles)
+    print(f"  kernel_cycles = {kc}")
+    assert all_pass, "test_mlp_8out: one or more neuron outputs do not match golden"
+    print("  Config B (4-in -> 8-out, 2 blocks): PASS")
+
+
+@cocotb.test()
+async def test_mlp_8in(dut):
+    """
+    Config C: 8-in -> 4-out MLP layer.
+
+    First kernel to use double-DOT4 accumulation per thread.
+    Thread computes 8-element dot product via two DOT4 instructions.
+    DOT4 uses rs3=rd as accumulator, so second call adds onto first result.
+
+    x = [85, 42, 127, 17, 60, -30, 10, -5]
+    Expected at mem[10..13]: [20, 15, 28, 6]
+    """
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+
+    base         = os.path.dirname(__file__)
+    axelbin_path = os.path.join(
+        base, "../../assembler/builds/bin/phase11_mlp_8in.axelbin"
+    )
+
+    kernel       = load_axelbin(axelbin_path)
+    instructions = {i: v for i, v in enumerate(kernel["instructions"])}
+    data_memory  = {i: v for i, v in enumerate(kernel["data_mem_raw"])}
+
+    EXPECTED = {10: 20, 11: 15, 12: 28, 13: 6}
+
+    print("\n── Config C: 8-in -> 4-out, 2x DOT4 accumulation ──")
+    print(f"  num_blocks={kernel['num_blocks']}  blockDim={kernel['blockDim']}")
+    print(f"  expected y[0..3] = {[EXPECTED[k] for k in sorted(EXPECTED)]}")
+
+    dut.rst.value          = 1
+    dut.dcr_write_en.value = 0
+    dut.prog_mem_resp_valid.value = 0
+    for i in range(NUM_CORES):
+        dut.prog_mem_resp_data[i].value = 0
+    dut.data_mem_resp_valid.value = 0
+    dut.data_mem_resp_data.value  = 0
+
+    instructions_ref = [instructions]
+    cocotb.start_soon(program_memory_model(dut, instructions_ref))
+    cocotb.start_soon(data_memory_model(dut, data_memory))
+
+    for _ in range(3):
+        await RisingEdge(dut.clk)
+    dut.rst.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 1
+
+    dut.dcr_addr.value = 0b00
+    dut.dcr_data.value = kernel["num_blocks"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b01
+    dut.dcr_data.value = kernel["blockDim"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b10
+    dut.dcr_data.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 0
+
+    for _ in range(TIMEOUT_CYCLES):
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
+        if dut.kernel_done.value == 1:
+            break
+
+    assert dut.kernel_done.value == 1, \
+        "test_mlp_8in: kernel never completed — hung"
+
+    print("\n── Results ──")
+    all_pass = True
+    for addr, exp in sorted(EXPECTED.items()):
+        got    = u32_to_signed(data_memory.get(addr, 0))
+        status = "PASS" if got == exp else "FAIL"
+        neuron = addr - 10
+        print(f"  y[{neuron}] mem[{addr}] = {got:4d}  (expected {exp:4d})  {status}")
+        if got != exp:
+            all_pass = False
+
+    kc = safe_int(dut.kernel_cycles)
+    print(f"  kernel_cycles = {kc}")
+    assert all_pass, "test_mlp_8in: one or more neuron outputs do not match golden"
+    print("  Config C (8-in -> 4-out, 2x DOT4): PASS")
+
+
+@cocotb.test()
+async def test_mlp_q6(dut):
+    """
+    Config D: 4-in -> 4-out, Q6 quantization scale (SAR 6).
+
+    Same topology as phase8 but scale factor = 64 (not 256).
+    Demonstrates that quantization granularity is a kernel-level choice,
+    not a hardware constraint. Only the CONST shift value changes.
+
+    Expected at mem[8..11]: [35, 89, 79, 49]
+    """
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+
+    base         = os.path.dirname(__file__)
+    axelbin_path = os.path.join(
+        base, "../../assembler/builds/bin/phase12_mlp_q6.axelbin"
+    )
+
+    kernel       = load_axelbin(axelbin_path)
+    instructions = {i: v for i, v in enumerate(kernel["instructions"])}
+    data_memory  = {i: v for i, v in enumerate(kernel["data_mem_raw"])}
+
+    EXPECTED = {8: 35, 9: 89, 10: 79, 11: 49}
+
+    print("\n── Config D: 4-in -> 4-out, Q6 scale (SAR 6) ──")
+    print(f"  num_blocks={kernel['num_blocks']}  blockDim={kernel['blockDim']}")
+    print(f"  expected y[0..3] = {[EXPECTED[k] for k in sorted(EXPECTED)]}")
+
+    dut.rst.value          = 1
+    dut.dcr_write_en.value = 0
+    dut.prog_mem_resp_valid.value = 0
+    for i in range(NUM_CORES):
+        dut.prog_mem_resp_data[i].value = 0
+    dut.data_mem_resp_valid.value = 0
+    dut.data_mem_resp_data.value  = 0
+
+    instructions_ref = [instructions]
+    cocotb.start_soon(program_memory_model(dut, instructions_ref))
+    cocotb.start_soon(data_memory_model(dut, data_memory))
+
+    for _ in range(3):
+        await RisingEdge(dut.clk)
+    dut.rst.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 1
+
+    dut.dcr_addr.value = 0b00
+    dut.dcr_data.value = kernel["num_blocks"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b01
+    dut.dcr_data.value = kernel["blockDim"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b10
+    dut.dcr_data.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 0
+
+    for _ in range(TIMEOUT_CYCLES):
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
+        if dut.kernel_done.value == 1:
+            break
+
+    assert dut.kernel_done.value == 1, \
+        "test_mlp_q6: kernel never completed — hung"
+
+    print("\n── Results ──")
+    all_pass = True
+    for addr, exp in sorted(EXPECTED.items()):
+        got    = u32_to_signed(data_memory.get(addr, 0))
+        status = "PASS" if got == exp else "FAIL"
+        neuron = addr - 8
+        print(f"  y[{neuron}] mem[{addr}] = {got:4d}  (expected {exp:4d})  {status}")
+        if got != exp:
+            all_pass = False
+
+    kc = safe_int(dut.kernel_cycles)
+    print(f"  kernel_cycles = {kc}")
+    assert all_pass, "test_mlp_q6: one or more neuron outputs do not match golden"
+    print("  Config D (Q6 scale, SAR 6): PASS")
+
 @cocotb.test()
 async def test_pyaxel_runner(dut):
     """
