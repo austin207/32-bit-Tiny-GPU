@@ -603,6 +603,211 @@ async def test_mlp_inference(dut):
     print(f"  kernel_cycles = {kc}")
     print("  MLP inference end-to-end: PASS")
 
+# ─── Append these two functions to the bottom of test_top_level_gpu.py ───────
+
+
+@cocotb.test()
+async def test_ldr_regbase_single(dut):
+    """
+    Single-thread LDR with general-purpose register base.
+
+    Verifies that R6 (a general-purpose register) can be used as
+    the base address for LDR after the lsu_done_latch fix.
+
+    Config  : 1 block, 1 thread (blockDim = 1)
+    Kernel  : CONST R6=4 | LDR R1, R6, 0 | STR R1, THREAD_IDX, 8 | RET
+    Pre-load: mem[4] = 0x12345678
+    Expected: mem[8] = 0x12345678
+    """
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+
+    base         = os.path.dirname(__file__)
+    axelbin_path = os.path.join(
+        base, "../../assembler/builds/bin/phase9_ldr_regbase_single.axelbin"
+    )
+
+    kernel       = load_axelbin(axelbin_path)
+    instructions = {i: v for i, v in enumerate(kernel["instructions"])}
+    data_memory  = {i: v for i, v in enumerate(kernel["data_mem_raw"])}
+
+    EXPECTED = {8: 0x12345678}
+
+    print("\n── LDR general-register base (single thread) ──")
+    print(f"  num_blocks={kernel['num_blocks']}  blockDim={kernel['blockDim']}")
+    print(f"  pre-load: mem[4] = {data_memory.get(4, 0):#010x}")
+    print(f"  expected: mem[8] = {EXPECTED[8]:#010x}")
+
+    dut.rst.value          = 1
+    dut.dcr_write_en.value = 0
+    dut.prog_mem_resp_valid.value = 0
+    for i in range(NUM_CORES):
+        dut.prog_mem_resp_data[i].value = 0
+    dut.data_mem_resp_valid.value = 0
+    dut.data_mem_resp_data.value  = 0
+
+    instructions_ref = [instructions]
+    cocotb.start_soon(program_memory_model(dut, instructions_ref))
+    cocotb.start_soon(data_memory_model(dut, data_memory))
+
+    for _ in range(3):
+        await RisingEdge(dut.clk)
+    dut.rst.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 1
+
+    dut.dcr_addr.value = 0b00
+    dut.dcr_data.value = kernel["num_blocks"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b01
+    dut.dcr_data.value = kernel["blockDim"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b10
+    dut.dcr_data.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 0
+
+    for _ in range(TIMEOUT_CYCLES):
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
+        if dut.kernel_done.value == 1:
+            break
+
+    assert dut.kernel_done.value == 1, \
+        "test_ldr_regbase_single: kernel never completed — hung"
+
+    print("\n── Results ──")
+    all_pass = True
+    for addr, exp in sorted(EXPECTED.items()):
+        got = data_memory.get(addr, 0) & 0xFFFFFFFF
+        status = "PASS" if got == exp else "FAIL"
+        print(f"  mem[{addr}] = {got:#010x}  (expected {exp:#010x})  {status}")
+        if got != exp:
+            all_pass = False
+
+    kc = safe_int(dut.kernel_cycles)
+    print(f"  kernel_cycles = {kc}")
+    assert all_pass, "test_ldr_regbase_single: R6-base LDR gave wrong result"
+    print("  R6-base LDR single-thread: PASS")
+
+
+@cocotb.test()
+async def test_ldr_regbase_broadcast(dut):
+    """
+    Multi-thread broadcast LDR with general-purpose register base.
+
+    All 4 SIMT threads load from the SAME address using R6 as base.
+    This is the critical case: 4 simultaneous requests to one address,
+    serialized by the round-robin memory controller, each thread must
+    get the correct resp_valid and correct data.
+
+    If this passes, the old R29/R30/R31-only LDR constraint is confirmed
+    stale — it was a symptom of the lsu_done_latch bug, now fixed.
+
+    Config  : 1 block, 4 threads (blockDim = 4)
+    Kernel  : CONST R6=4 | LDR R1, R6, 0 | STR R1, THREAD_IDX, 8 | RET
+    Pre-load: mem[4] = 0x12345678
+    Expected: mem[8..11] = 0x12345678  (one per thread)
+    """
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+
+    base         = os.path.dirname(__file__)
+    axelbin_path = os.path.join(
+        base, "../../assembler/builds/bin/phase9_ldr_regbase_broadcast.axelbin"
+    )
+
+    kernel       = load_axelbin(axelbin_path)
+    instructions = {i: v for i, v in enumerate(kernel["instructions"])}
+    data_memory  = {i: v for i, v in enumerate(kernel["data_mem_raw"])}
+
+    EXPECTED = {8: 0x12345678, 9: 0x12345678, 10: 0x12345678, 11: 0x12345678}
+
+    print("\n── LDR general-register base (4-thread broadcast) ──")
+    print(f"  num_blocks={kernel['num_blocks']}  blockDim={kernel['blockDim']}")
+    print(f"  pre-load: mem[4] = {data_memory.get(4, 0):#010x}")
+    print(f"  expected: mem[8..11] = 0x12345678 (all 4 threads)")
+
+    dut.rst.value          = 1
+    dut.dcr_write_en.value = 0
+    dut.prog_mem_resp_valid.value = 0
+    for i in range(NUM_CORES):
+        dut.prog_mem_resp_data[i].value = 0
+    dut.data_mem_resp_valid.value = 0
+    dut.data_mem_resp_data.value  = 0
+
+    instructions_ref = [instructions]
+    cocotb.start_soon(program_memory_model(dut, instructions_ref))
+    cocotb.start_soon(data_memory_model(dut, data_memory))
+
+    for _ in range(3):
+        await RisingEdge(dut.clk)
+    dut.rst.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 1
+
+    dut.dcr_addr.value = 0b00
+    dut.dcr_data.value = kernel["num_blocks"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b01
+    dut.dcr_data.value = kernel["blockDim"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b10
+    dut.dcr_data.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 0
+
+    for _ in range(TIMEOUT_CYCLES):
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
+        if dut.kernel_done.value == 1:
+            break
+
+    assert dut.kernel_done.value == 1, \
+        "test_ldr_regbase_broadcast: kernel never completed — hung"
+
+    print("\n── Results ──")
+    all_pass = True
+    for addr, exp in sorted(EXPECTED.items()):
+        got = data_memory.get(addr, 0) & 0xFFFFFFFF
+        status = "PASS" if got == exp else "FAIL"
+        thread = addr - 8
+        print(f"  thread {thread} | mem[{addr}] = {got:#010x}  (expected {exp:#010x})  {status}")
+        if got != exp:
+            all_pass = False
+
+    kc = safe_int(dut.kernel_cycles)
+    print(f"  kernel_cycles = {kc}")
+
+    if all_pass:
+        print("  R6-base broadcast LDR across 4 threads: PASS")
+        print("  Confirms: old R29/R30/R31-only constraint is STALE.")
+        print("  Root cause was lsu_done_latch bug. Now fixed.")
+    else:
+        print("  FAIL — general-register LDR base still broken after latch fix.")
+        print("  Investigate: mem_controller same-address arbitration, writeback timing.")
+
+    assert all_pass, "test_ldr_regbase_broadcast: one or more threads got wrong data"
 
 @cocotb.test()
 async def test_pyaxel_runner(dut):
@@ -686,3 +891,4 @@ async def test_pyaxel_runner(dut):
 
     with open(result_path, "w") as f:
         _json.dump(result, f)
+

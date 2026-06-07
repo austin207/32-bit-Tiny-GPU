@@ -121,73 +121,51 @@ LDR/STR opcode, not when the scheduler fires lsu_en.
 
 ---
 
-## LDR base register constraint in multi-thread SIMT mode
+## LDR base register constraint — RESOLVED (confirmed stale)
 
-### Observed constraint
+### Original claim
 
-In multi-thread SIMT mode (blockDim > 1), using a general-purpose register
-(R0-R28) as the base address in an LDR instruction produces incorrect memory
-addresses. The effective address behaves as if THREAD_IDX was used instead.
+Earlier documentation stated that in multi-thread SIMT mode (blockDim > 1),
+LDR/STR base registers must be R29/R30/R31. Using R0-R28 as base was
+described as producing incorrect addresses.
 
-Example that fails:
+### Resolution
 
-```c
-axel_const(&gpu, R6, 4);           // R6 = 4
-axel_ldr  (&gpu, R2, R6, 0);       // expected: mem[4], actual: mem[THREAD_IDX]
-```
+The constraint was a misdiagnosis. The symptoms were caused entirely by the
+stale lsu_done_latch bug documented above. After that fix, general-purpose
+register bases work correctly in all configurations.
 
-Example that works reliably:
-
-```c
-axel_ldr(&gpu, R2, THREAD_IDX, 4); // mem[THREAD_IDX + 4]  -- always correct
-```
-
-### Scope
-
-Single-thread kernels (blockDim=1) are not affected. All three of R29
-(THREAD_IDX), R30 (BLOCK_IDX), and R31 (BLOCK_DIM) work correctly as LDR
-base registers in all configurations.
-
-### Root cause status
-
-Unresolved. The register file read ports, decoder field extraction, and core
-wiring all appear correct in static analysis. The fault does not manifest in
-single-thread mode and was not reproduced in isolation. The stale lsu_done_latch
-bug (above) was fixed first, but the GP-register LDR constraint persists
-after that fix. Needs further investigation with waveform capture on a minimal
-reproducer (two consecutive LDRs, second using a CONST-written base).
-
-### Workaround
-
-Structure data memory so all parallel loads use THREAD_IDX-relative addressing.
-For broadcast data (same value all threads need), replicate it N times so
-thread i loads via `THREAD_IDX + offset`:
-
-```c
-// x replicated at mem[4..7] so all threads load via THREAD_IDX + 4
-axel_set_data(&gpu, 4, x_packed);
-axel_set_data(&gpu, 5, x_packed);
-axel_set_data(&gpu, 6, x_packed);
-axel_set_data(&gpu, 7, x_packed);
-
-axel_ldr(&gpu, R2, THREAD_IDX, 4);  // mem[THREAD_IDX + 4] = x for all threads
-```
-
-This wastes N-1 data words but is reliable across all tested configurations.
-
-### ISA constraint to enforce in assembler and documentation
+Verified by test_ldr_regbase_broadcast in test_top_level_gpu.py:
 
 ```text
-In multi-thread SIMT kernels (blockDim > 1):
-  LDR/STR base register MUST be R29 (THREAD_IDX), R30 (BLOCK_IDX), or R31 (BLOCK_DIM).
-  Using R0-R28 as LDR/STR base addresses is not supported in this configuration.
+Config  : 1 block, 4 threads (blockDim = 4)
+Kernel  : CONST R6=4 | LDR R1, R6, 0 | STR R1, THREAD_IDX, 8 | RET
+Pre-load: mem[4] = 0x12345678
+
+Result:
+  thread 0 | mem[8]  = 0x12345678  PASS
+  thread 1 | mem[9]  = 0x12345678  PASS
+  thread 2 | mem[10] = 0x12345678  PASS
+  thread 3 | mem[11] = 0x12345678  PASS
+
+kernel_cycles = 55
 ```
 
-### Files involved
+All 4 threads loaded from the same address via R6 base. Round-robin
+memory controller serialized the 4 requests correctly. lsu_done_latch
+accumulated all 4 completions before scheduler exited WAIT.
+
+### Files updated
 
 ```text
-Src/core/core.sv             (likely location of fault)
-Src/registers/register_file.sv
-assembler/examples/phase8_mlp_inference.c  (workaround applied here)
-Src/Top_level_GPU/test_top_level_gpu.py
+assembler/examples/phase8_mlp_inference.c   (stale constraint comment removed)
+docs/debug_log.md                           (this entry)
+Src/Top_level_GPU/test_top_level_gpu.py     (two new tests added)
+assembler/examples/phase9_ldr_regbase_single.c
+assembler/examples/phase9_ldr_regbase_broadcast.c
 ```
+
+### ISA constraint status
+
+No LDR/STR base register restriction exists. R0-R31 all valid as base
+in single-thread and multi-thread SIMT configurations.
