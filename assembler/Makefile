@@ -6,9 +6,9 @@ BUILD  = builds
 HEX    = builds/hex
 BIN    = builds/bin
 
-.PHONY: all clean test_add test_axel phase1 phase2 phase3 phase4 phase5 phase6 phase7 phase8 phase9_single phase9_broadcast phase10 phase11 phase12 phase13 phase14
+.PHONY: all clean test_add test_axel phase1 phase2 phase3 phase4 phase5 phase6 phase7 phase8 phase9_single phase9_broadcast phase10 phase11 phase12 phase13 phase14 phase15 phase16
 
-all: phase1 phase2 phase3 phase4 phase5 phase6 phase7 phase8 phase9_single phase9_broadcast phase10 phase11 phase12 phase13 phase14
+all: phase1 phase2 phase3 phase4 phase5 phase6 phase7 phase8 phase9_single phase9_broadcast phase10 phase11 phase12 phase13 phase14 phase15 phase16
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -82,6 +82,14 @@ phase13: $(BUILD)
 phase14: $(BUILD)
 	$(CC) $(CFLAGS) examples/phase14_digit_output.c $(SRCS) -o $(BUILD)/phase14
 	cd $(BUILD) && ./phase14
+
+phase15: $(BUILD)
+	$(CC) $(CFLAGS) examples/phase15_digit64_hidden.c $(SRCS) -o $(BUILD)/phase15
+	cd $(BUILD) && ./phase15
+
+phase16: $(BUILD)
+	$(CC) $(CFLAGS) examples/phase16_digit64_output.c $(SRCS) -o $(BUILD)/phase16
+	cd $(BUILD) && ./phase16
 
 clean:
 	rm -rf $(BUILD)
