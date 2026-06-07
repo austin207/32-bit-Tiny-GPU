@@ -91,6 +91,14 @@ void axel_max(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2) {
     emit_max(&gpu->program, rd, rs1, rs2);
 }
 
+void axel_min(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    emit_min(&gpu->program, rd, rs1, rs2);
+}
+ 
+void axel_exp8(AxelGPU *gpu, uint8_t rd, uint8_t rs1) {
+    emit_exp8(&gpu->program, rd, rs1);
+}
+
 void axel_ldr(AxelGPU *gpu, uint8_t rd, uint8_t rs, uint16_t imm) {
     emit_ldr(&gpu->program, rd, rs, imm);
 }

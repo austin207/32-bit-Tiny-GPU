@@ -29,6 +29,8 @@
 #define OP_RELU 0x17
 #define OP_CLAMP 0x18
 #define OP_MAX 0x19
+#define OP_MIN  0x1A
+#define OP_EXP8 0x1B
 
 typedef struct {
     uint32_t instructions[256];
@@ -57,6 +59,8 @@ void emit_dot(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_relu(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_clamp(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void emit_max(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
+void emit_min(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2);
+void emit_exp8(GPUProgram *prog, uint8_t rd, uint8_t rs1);
 void emit_ldr(GPUProgram *prog, uint8_t rd, uint8_t rs, uint16_t imm);
 void emit_str(GPUProgram *prog, uint8_t rd, uint8_t rs, uint16_t imm);
 void emit_const(GPUProgram *prog, uint8_t rd, uint16_t imm);

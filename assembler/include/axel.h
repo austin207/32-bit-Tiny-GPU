@@ -76,6 +76,8 @@ void axel_dot(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_relu(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_clamp(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
 void axel_max(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
+void axel_min(AxelGPU *gpu, uint8_t rd, uint8_t rs1, uint8_t rs2);
+void axel_exp8(AxelGPU *gpu, uint8_t rd, uint8_t rs1);
 void axel_ldr(AxelGPU *gpu, uint8_t rd, uint8_t rs, uint16_t imm);
 void axel_str(AxelGPU *gpu, uint8_t rd, uint8_t rs, uint16_t imm);
 void axel_const(AxelGPU *gpu, uint8_t rd, uint16_t imm);

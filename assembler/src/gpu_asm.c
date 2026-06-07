@@ -104,6 +104,14 @@ void emit_max(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2) {
     prog->instructions[prog->count++] = encode_r(OP_MAX, rd, rs1, rs2, 0);
 }
 
+void emit_min(GPUProgram *prog, uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    prog->instructions[prog->count++] = encode_r(OP_MIN, rd, rs1, rs2, 0);
+}
+ 
+void emit_exp8(GPUProgram *prog, uint8_t rd, uint8_t rs1) {
+    prog->instructions[prog->count++] = encode_r(OP_EXP8, rd, rs1, 0, 0);
+}
+
 void emit_ldr(GPUProgram *prog, uint8_t rd, uint8_t rs, uint16_t imm) {
     prog->instructions[prog->count++] = encode_i(OP_LDR, rd, rs, imm); 
 }

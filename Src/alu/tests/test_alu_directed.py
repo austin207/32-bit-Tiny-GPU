@@ -305,3 +305,77 @@ async def test_max_both_negative(dut):
 async def test_max_negative_vs_positive(dut):
     await drive_alu(dut, OP_MAX, u32(-3), 2)
     assert_result_s32(dut, 2, "MAX negative vs positive")
+
+
+# ── MIN directed tests ────────────────────────────────────────────────────────
+
+@cocotb.test()
+async def test_min_first_smaller(dut):
+    await drive_alu(dut, OP_MIN, 5, 10)
+    assert_result_s32(dut, 5, "MIN first smaller")
+
+
+@cocotb.test()
+async def test_min_second_smaller(dut):
+    await drive_alu(dut, OP_MIN, 20, 3)
+    assert_result_s32(dut, 3, "MIN second smaller")
+
+
+@cocotb.test()
+async def test_min_equal(dut):
+    await drive_alu(dut, OP_MIN, 7, 7)
+    assert_result_s32(dut, 7, "MIN equal")
+
+
+@cocotb.test()
+async def test_min_negative_vs_positive(dut):
+    await drive_alu(dut, OP_MIN, u32(-5), 3)
+    assert_result_s32(dut, -5, "MIN negative vs positive")
+
+
+# ── EXP8 directed tests ───────────────────────────────────────────────────────
+
+@cocotb.test()
+async def test_exp8_zero_input(dut):
+    # x=0: exp(0/64)*127 = 127, saturates
+    await drive_alu(dut, OP_EXP8, 0)
+    assert_result_u32(dut, 127, "EXP8 x=0 saturates")
+
+
+@cocotb.test()
+async def test_exp8_positive_input_saturates(dut):
+    # x=64: exp(1.0)*127 >> 127, saturates
+    await drive_alu(dut, OP_EXP8, 64)
+    assert_result_u32(dut, 127, "EXP8 x=64 saturates")
+
+
+@cocotb.test()
+async def test_exp8_minus64(dut):
+    # x=-64: exp(-1.0)*127 = 47
+    await drive_alu(dut, OP_EXP8, u32(-64))
+    assert_result_u32(dut, 47, "EXP8 x=-64")
+
+
+@cocotb.test()
+async def test_exp8_minus128(dut):
+    # x=-128: exp(-2.0)*127 = 17
+    await drive_alu(dut, OP_EXP8, u32(-128))
+    assert_result_u32(dut, 17, "EXP8 x=-128")
+
+
+@cocotb.test()
+async def test_exp8_minus32(dut):
+    # x=-32: exp(-0.5)*127 = 77
+    await drive_alu(dut, OP_EXP8, u32(-32))
+    assert_result_u32(dut, 77, "EXP8 x=-32")
+
+
+@cocotb.test()
+async def test_exp8_monotone_decreasing(dut):
+    # For x = -128 to -1, output must be non-increasing
+    prev = 0  # smaller than any possible output
+    for x in range(-128, 0):
+        await drive_alu(dut, OP_EXP8, u32(x))
+        v = int(dut.result.value)
+        assert v >= prev, f"EXP8 not monotone at x={x}: got {v} < prev {prev}"
+        prev = v
