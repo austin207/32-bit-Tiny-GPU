@@ -2,7 +2,7 @@
 #define AXEL_H
 #include "gpu_asm.h"
 
-#define MAX_DATA_WORDS 256
+#define MAX_DATA_WORDS 512
 
 // 
 

@@ -1097,6 +1097,226 @@ async def test_mlp_q6(dut):
     print("  Config D (Q6 scale, SAR 6): PASS")
 
 @cocotb.test()
+async def test_digit_hidden_phase13(dut):
+    """
+    Phase 13: digit classifier hidden layer.
+
+    Computes hidden activations:
+        h = CLAMP(RELU(SAR(W_h * x, 8)))
+
+    Expected:
+        mem[20..23] = [42, 37, 0, 6]
+    """
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+
+    base = os.path.dirname(__file__)
+    axelbin_path = os.path.join(
+        base, "../../assembler/builds/bin/phase13_digit_hidden.axelbin"
+    )
+
+    kernel = load_axelbin(axelbin_path)
+    instructions = {i: v for i, v in enumerate(kernel["instructions"])}
+    data_memory = {i: v for i, v in enumerate(kernel["data_mem_raw"])}
+
+    EXPECTED = {
+        20: 42,
+        21: 37,
+        22: 0,
+        23: 6,
+    }
+
+    print("\n── Phase 13: digit classifier hidden layer ──")
+    print(f"  num_blocks={kernel['num_blocks']}  blockDim={kernel['blockDim']}")
+    print(f"  expected h[0..3] at mem[20..23] = {[EXPECTED[k] for k in sorted(EXPECTED)]}")
+
+    dut.rst.value = 1
+    dut.dcr_write_en.value = 0
+    dut.prog_mem_resp_valid.value = 0
+    for i in range(NUM_CORES):
+        dut.prog_mem_resp_data[i].value = 0
+    dut.data_mem_resp_valid.value = 0
+    dut.data_mem_resp_data.value = 0
+
+    instructions_ref = [instructions]
+    cocotb.start_soon(program_memory_model(dut, instructions_ref))
+    cocotb.start_soon(data_memory_model(dut, data_memory))
+
+    for _ in range(3):
+        await RisingEdge(dut.clk)
+    dut.rst.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 1
+
+    dut.dcr_addr.value = 0b00
+    dut.dcr_data.value = kernel["num_blocks"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b01
+    dut.dcr_data.value = kernel["blockDim"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b10
+    dut.dcr_data.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 0
+
+    for _ in range(TIMEOUT_CYCLES):
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
+        if dut.kernel_done.value == 1:
+            break
+
+    assert dut.kernel_done.value == 1, \
+        "test_digit_hidden_phase13: kernel never completed — hung"
+
+    print("\n── Hidden layer results ──")
+    all_pass = True
+    for addr, exp in sorted(EXPECTED.items()):
+        got = u32_to_signed(data_memory.get(addr, 0))
+        status = "PASS" if got == exp else "FAIL"
+        hidden_idx = addr - 20
+        print(f"  h[{hidden_idx}] mem[{addr}] = {got:4d}  (expected {exp:4d})  {status}")
+        if got != exp:
+            all_pass = False
+
+    kc = safe_int(dut.kernel_cycles)
+    print(f"  kernel_cycles = {kc}")
+
+    assert all_pass, "test_digit_hidden_phase13: hidden activations mismatch"
+    print("  Phase 13 hidden layer: PASS")
+
+@cocotb.test()
+async def test_digit_output_phase14(dut):
+    """
+    Phase 14: digit classifier output layer.
+
+    Uses scalar IMUL + ADD because hidden values are INT32 scalars,
+    not packed INT8x4.
+
+    This test preloads the known Phase 13 hidden output:
+        h[0..3] = [42, 37, 0, 6]
+
+    Then Phase 14 computes:
+        y = CLAMP(RELU(SAR(W_o * h, 8)))
+
+    Expected:
+        mem[40..43] = [7, 5, 2, 5]
+        argmax = class 0
+    """
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+
+    base = os.path.dirname(__file__)
+    axelbin_path = os.path.join(
+        base, "../../assembler/builds/bin/phase14_digit_output.axelbin"
+    )
+
+    kernel = load_axelbin(axelbin_path)
+    instructions = {i: v for i, v in enumerate(kernel["instructions"])}
+    data_memory = {i: v for i, v in enumerate(kernel["data_mem_raw"])}
+
+    # Preload hidden activations from Phase 13.
+    data_memory[20] = 42
+    data_memory[21] = 37
+    data_memory[22] = 0
+    data_memory[23] = 6
+
+    EXPECTED = {
+        40: 7,
+        41: 5,
+        42: 2,
+        43: 5,
+    }
+
+    print("\n── Phase 14: digit classifier output layer ──")
+    print(f"  num_blocks={kernel['num_blocks']}  blockDim={kernel['blockDim']}")
+    print("  preloaded h[0..3] = [42, 37, 0, 6]")
+    print(f"  expected y[0..3] at mem[40..43] = {[EXPECTED[k] for k in sorted(EXPECTED)]}")
+    print("  expected argmax = class 0")
+
+    dut.rst.value = 1
+    dut.dcr_write_en.value = 0
+    dut.prog_mem_resp_valid.value = 0
+    for i in range(NUM_CORES):
+        dut.prog_mem_resp_data[i].value = 0
+    dut.data_mem_resp_valid.value = 0
+    dut.data_mem_resp_data.value = 0
+
+    instructions_ref = [instructions]
+    cocotb.start_soon(program_memory_model(dut, instructions_ref))
+    cocotb.start_soon(data_memory_model(dut, data_memory))
+
+    for _ in range(3):
+        await RisingEdge(dut.clk)
+    dut.rst.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 1
+
+    dut.dcr_addr.value = 0b00
+    dut.dcr_data.value = kernel["num_blocks"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b01
+    dut.dcr_data.value = kernel["blockDim"]
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_addr.value = 0b10
+    dut.dcr_data.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+
+    dut.dcr_write_en.value = 0
+
+    for _ in range(TIMEOUT_CYCLES):
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
+        if dut.kernel_done.value == 1:
+            break
+
+    assert dut.kernel_done.value == 1, \
+        "test_digit_output_phase14: kernel never completed — hung"
+
+    print("\n── Output layer results ──")
+    all_pass = True
+    scores = []
+
+    for addr, exp in sorted(EXPECTED.items()):
+        got = u32_to_signed(data_memory.get(addr, 0))
+        scores.append(got)
+        status = "PASS" if got == exp else "FAIL"
+        out_idx = addr - 40
+        print(f"  y[{out_idx}] mem[{addr}] = {got:4d}  (expected {exp:4d})  {status}")
+        if got != exp:
+            all_pass = False
+
+    pred = max(range(len(scores)), key=lambda i: scores[i])
+
+    kc = safe_int(dut.kernel_cycles)
+    print(f"  scores = {scores}")
+    print(f"  argmax = class {pred}")
+    print(f"  kernel_cycles = {kc}")
+
+    assert all_pass, "test_digit_output_phase14: output scores mismatch"
+    assert pred == 0, f"test_digit_output_phase14: expected argmax class 0, got class {pred}"
+
+    print("  Phase 14 output layer: PASS")
+
+@cocotb.test()
 async def test_pyaxel_runner(dut):
     """
     PyAXEL runtime test runner.
