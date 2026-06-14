@@ -2,39 +2,173 @@
 
 A custom 32-bit SIMT GPU built from scratch in SystemVerilog.
 
-This project includes a custom ISA, AXEL C assembler, cocotb verification suite,
-SIMT branch divergence with warp-stack reconvergence, a round-robin memory arbiter,
-Q8 fixed-point neural-network workloads, FPGA targeting for the Sipeed Tang Nano 20K,
-and a full RTL-to-GDSII run on SkyWater Sky130A via OpenLane 2.
+This project includes a custom ISA, AXEL C assembler, `axelcc` C-subset compiler, cocotb verification suite, SIMT branch divergence with warp-stack reconvergence, a round-robin memory arbiter, Q8 fixed-point neural-network workloads, an MMIO matmul accelerator, FPGA targeting for the Sipeed Tang Nano 20K, and a full RTL-to-GDSII run on SkyWater Sky130A via OpenLane 2.
 
 ---
 
 ## Status
 
 ```text
-RTL simulation:      47/47 tests passing
-Top-level GPU test:  PASSING
-SIMT ReLU test:      PASSING
-Execution trace:     cycle-accurate CSV logger integrated
-Kernel cycle counter: hardware 32-bit counter on kernel_cycles port
-PyAXEL runtime:      cocotb subprocess backend, smoke test passing
-FPGA target:         Tang Nano 20K (wrapper updated, flash pending)
-ASIC flow:           Sky130A GDS, 0 DRC violations, LVS passed
-Post-route STA:      32.9 MHz (TT), 18.6 MHz (SS)
+Full regression:        315/315 tests passing
+Top-level GPU suite:    20/20 tests passing
+SIMT ReLU test:         PASSING
+DOT4 kernel test:       PASSING
+Q8 MLP workloads:       PASSING
+Q8 matvec/matmul:       PASSING
+Phase 21 accelerator:   PASSING
+axelcc ReLU RTL test:   PASSING
+Execution trace:        cycle-accurate CSV logger integrated
+Kernel cycle counter:   hardware 32-bit counter on kernel_cycles port
+PyAXEL runtime:         cocotb subprocess backend, smoke test passing
+FPGA target:            Tang Nano 20K
+ASIC flow:              Sky130A GDS, 0 DRC violations, LVS passed
+Post-route STA:         32.9 MHz (TT), 18.6 MHz (SS)
 ```
 
-Key verified regression: Phase 6 SIMT ReLU:
+Latest verified regression summary:
+
+```text
+ALU:                 64/64 PASS
+Registers:           21/21 PASS
+PC:                  23/23 PASS
+Decoder:             23/23 PASS
+Fetcher:             21/21 PASS
+LSU:                 29/29 PASS
+Memory Controller:   20/20 PASS
+Scheduler:           25/25 PASS
+Core:                14/14 PASS
+Dispatcher:          19/19 PASS
+DCR:                 19/19 PASS
+Warp Stack:          17/17 PASS
+Top-Level GPU:       20/20 PASS
+
+Total:               315/315 PASS
+```
+
+Key verified top-level workloads:
+
+```text
+Phase 6  SIMT ReLU
+Phase 7  DOT4 kernel
+Phase 8  Q8 MLP 4->4
+Phase 9  register-base LDR
+Phase 10 Q8 MLP 4->8
+Phase 11 Q8 MLP 8->4
+Phase 12 Q6/SAR6 MLP
+Phase 13 small digit hidden layer
+Phase 14 small digit output layer
+Phase 15 true 64->16 hidden layer
+Phase 16 chained 64->16->10 classifier
+Phase 17 Q8 4x4 matvec
+Phase 18 Q8 4x4 matmul
+Phase 19 Q8 4x8 matmul
+Phase 20 Q8 4x16 tiled matmul
+Phase 21 MMIO matmul accelerator
+axelcc compiler-generated ReLU
+```
+
+---
+
+## Key Verified Regressions
+
+### Phase 6 SIMT ReLU
 
 ```text
 Input:
-  mem[0] =  5   mem[1] = -3   mem[2] =  8   mem[3] = -1
+  mem[0] =  5
+  mem[1] = -3
+  mem[2] =  8
+  mem[3] = -1
 
 Output:
-  mem[4] =  5   mem[5] =  0   mem[6] =  8   mem[7] =  0
+  mem[4] = 5
+  mem[5] = 0
+  mem[6] = 8
+  mem[7] = 0
 ```
 
-This single test exercises: LDR writeback, CMP, BRnzp, stored NZP flags,
-active-mask gating, warp-stack push/pop, SYNC reconvergence, STR, and kernel completion.
+This test exercises:
+
+```text
+LDR writeback
+CMP
+BRnzp
+stored NZP flags
+active-mask gating
+warp-stack push/pop
+SYNC reconvergence
+STR
+kernel completion
+```
+
+### Phase 7 DOT4 Kernel
+
+```text
+vec A = [1, 2, 3, 4]
+vec B = [1, 2, 3, 4]
+
+golden result   = 30
+hardware result = 30
+```
+
+### Phase 8 Q8 MLP 4->4
+
+```text
+y[0] = 20
+y[1] = 48
+y[2] = 25
+y[3] = 8
+```
+
+### Phase 15 True 64->16 Hidden Layer
+
+```text
+h = [7, 0, 0, 5, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 3, 0]
+```
+
+### Phase 16 Chained 64->16->10 Classifier
+
+```text
+scores = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+argmax = class 0
+```
+
+### Phase 20 Q8 4x16 Tiled Matmul
+
+```text
+C[0] = [16, 32,  8,  8]
+C[1] = [32, 64, 16, 16]
+C[2] = [28, 56, 16, 12]
+C[3] = [40, 80, 16, 24]
+
+kernel_cycles = 342
+```
+
+### Phase 21 MMIO Matmul Accelerator
+
+```text
+C[0] = [16, 32,  8,  8]
+C[1] = [32, 64, 16, 16]
+C[2] = [28, 56, 16, 12]
+C[3] = [40, 80, 16, 24]
+
+Phase 21 cycles:   605
+Phase 20 baseline: 342
+Delta:             +263
+```
+
+The Phase 21 accelerator is currently sequential, so it is slower than the parallel DOT4 GPU kernel for this small matrix size. Its purpose is to verify top-level MMIO accelerator integration, runtime configuration latching, memory read/write behavior, completion tracking, and accelerator-aware `kernel_done` gating.
+
+### axelcc Compiler ReLU
+
+```text
+input  = [5, -3, 8, -1]
+output = [5,  0, 8,  0]
+
+kernel_cycles = 138
+```
+
+The compiler-generated `.hex` executes correctly on the full `Top_level_GPU` RTL testbench.
 
 ---
 
@@ -45,7 +179,7 @@ active-mask gating, warp-stack push/pop, SYNC reconvergence, STR, and kernel com
 Default simulation configuration:
 
 ```text
-NUM_CORES        = 4
+NUM_CORES         = 4
 THREADS_PER_CORE = 4
 TOTAL_THREADS    = 16
 ```
@@ -56,6 +190,7 @@ Top-level hierarchy:
 gpu
 ├── dcr
 ├── dispatcher
+├── matmul_accelerator
 └── core_gen[i]  (i = 0..3)
     └── core
         ├── fetcher
@@ -76,36 +211,41 @@ Full architecture details: [`docs/architecture.md`](docs/architecture.md)
 
 ## Documentation
 
-| Document | Path |
-|---|---|
-| Architecture | [`docs/architecture.md`](docs/architecture.md) |
-| ISA | [`docs/isa.md`](docs/isa.md) |
-| Memory map | [`docs/memory_map.md`](docs/memory_map.md) |
-| Debug log | [`docs/debug_log.md`](docs/debug_log.md) |
-| AXEL assembler | [`assembler/README.md`](assembler/README.md) |
-| FPGA build | [`fpga/README.md`](fpga/README.md) |
-| OpenLane / GDS | [`gds/README.md`](gds/README.md) |
-| Post-route STA | [`sta/`](sta/) |
+| Document                | Path                                                                   |
+| ----------------------- | ---------------------------------------------------------------------- |
+| Architecture            | [`docs/architecture.md`](docs/architecture.md)                         |
+| ISA                     | [`docs/isa.md`](docs/isa.md)                                           |
+| Memory map              | [`docs/memory_map.md`](docs/memory_map.md)                             |
+| Debug log               | [`docs/debug_log.md`](docs/debug_log.md)                               |
+| AI inference milestones | [`docs/ai_inference_milestones.md`](docs/ai_inference_milestones.md)   |
+| AXEL assembler          | [`assembler/README.md`](assembler/README.md)                           |
+| axelcc compiler         | [`axelcc/README.md`](axelcc/README.md)                                 |
+| Matmul accelerator      | [`Src/matmul_accelerator/README.md`](Src/matmul_accelerator/README.md) |
+| FPGA build              | [`fpga/README.md`](fpga/README.md)                                     |
+| OpenLane / GDS          | [`gds/README.md`](gds/README.md)                                       |
+| Post-route STA          | [`sta/`](sta/)                                                         |
+| PyAXEL runtime          | [`pyaxel/README.md`](pyaxel/README.md)                                 |
 
 ---
 
 ## Module Documentation
 
-| Module | README | RTL | Testbench |
-|---|---|---|---|
-| ALU | [`Src/alu/README.md`](Src/alu/README.md) | [`Src/alu/alu.sv`](Src/alu/alu.sv) | [`Src/alu/test_alu.py`](Src/alu/test_alu.py) |
-| Core | [`Src/core/README.md`](Src/core/README.md) | [`Src/core/core.sv`](Src/core/core.sv) | [`Src/core/test_core.py`](Src/core/test_core.py) |
-| Decoder | [`Src/decoder/README.md`](Src/decoder/README.md) | [`Src/decoder/decoder.sv`](Src/decoder/decoder.sv) | [`Src/decoder/test_decoder.py`](Src/decoder/test_decoder.py) |
-| DCR | [`Src/device_control_register/README.md`](Src/device_control_register/README.md) | [`Src/device_control_register/dcr.sv`](Src/device_control_register/dcr.sv) | [`Src/device_control_register/test_dcr.py`](Src/device_control_register/test_dcr.py) |
-| Dispatcher | [`Src/dispatcher/README.md`](Src/dispatcher/README.md) | [`Src/dispatcher/dispatcher.sv`](Src/dispatcher/dispatcher.sv) | [`Src/dispatcher/test_dispatcher.py`](Src/dispatcher/test_dispatcher.py) |
-| Fetcher | [`Src/fetcher/README.md`](Src/fetcher/README.md) | [`Src/fetcher/fetcher.sv`](Src/fetcher/fetcher.sv) | [`Src/fetcher/test_fetcher.py`](Src/fetcher/test_fetcher.py) |
-| LSU | [`Src/lsu/README.md`](Src/lsu/README.md) | [`Src/lsu/lsu.sv`](Src/lsu/lsu.sv) | [`Src/lsu/test_lsu.py`](Src/lsu/test_lsu.py) |
-| Memory Controller | [`Src/memory_controller/README.md`](Src/memory_controller/README.md) | [`Src/memory_controller/mem_controller.sv`](Src/memory_controller/mem_controller.sv) | [`Src/memory_controller/test_mem_controller.py`](Src/memory_controller/test_mem_controller.py) |
-| PC | [`Src/pc/README.md`](Src/pc/README.md) | [`Src/pc/pc.sv`](Src/pc/pc.sv) | [`Src/pc/test_pc.py`](Src/pc/test_pc.py) |
-| Registers | [`Src/registers/README.md`](Src/registers/README.md) | [`Src/registers/register_file.sv`](Src/registers/register_file.sv) | [`Src/registers/test_registers.py`](Src/registers/test_registers.py) |
-| Scheduler | [`Src/scheduler/README.md`](Src/scheduler/README.md) | [`Src/scheduler/scheduler.sv`](Src/scheduler/scheduler.sv) | [`Src/scheduler/test_scheduler.py`](Src/scheduler/test_scheduler.py) |
-| Top-Level GPU | [`Src/Top_level_GPU/README.md`](Src/Top_level_GPU/README.md) | [`Src/Top_level_GPU/top_level_gpu.sv`](Src/Top_level_GPU/top_level_gpu.sv) | [`Src/Top_level_GPU/test_top_level_gpu.py`](Src/Top_level_GPU/test_top_level_gpu.py) |
-| Warp Stack | [`Src/warp_stack/README.md`](Src/warp_stack/README.md) | [`Src/warp_stack/warp_stack.sv`](Src/warp_stack/warp_stack.sv) | [`Src/warp_stack/test_warp_stack.py`](Src/warp_stack/test_warp_stack.py) |
+| Module             | README                                                                           | RTL                                                                                            | Tests                                                                      |
+| ------------------ | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| ALU                | [`Src/alu/README.md`](Src/alu/README.md)                                         | [`Src/alu/alu.sv`](Src/alu/alu.sv)                                                             | [`Src/alu/tests/`](Src/alu/tests/)                                         |
+| Core               | [`Src/core/README.md`](Src/core/README.md)                                       | [`Src/core/core.sv`](Src/core/core.sv)                                                         | [`Src/core/tests/`](Src/core/tests/)                                       |
+| Decoder            | [`Src/decoder/README.md`](Src/decoder/README.md)                                 | [`Src/decoder/decoder.sv`](Src/decoder/decoder.sv)                                             | [`Src/decoder/tests/`](Src/decoder/tests/)                                 |
+| DCR                | [`Src/device_control_register/README.md`](Src/device_control_register/README.md) | [`Src/device_control_register/dcr.sv`](Src/device_control_register/dcr.sv)                     | [`Src/device_control_register/tests/`](Src/device_control_register/tests/) |
+| Dispatcher         | [`Src/dispatcher/README.md`](Src/dispatcher/README.md)                           | [`Src/dispatcher/dispatcher.sv`](Src/dispatcher/dispatcher.sv)                                 | [`Src/dispatcher/tests/`](Src/dispatcher/tests/)                           |
+| Fetcher            | [`Src/fetcher/README.md`](Src/fetcher/README.md)                                 | [`Src/fetcher/fetcher.sv`](Src/fetcher/fetcher.sv)                                             | [`Src/fetcher/tests/`](Src/fetcher/tests/)                                 |
+| LSU                | [`Src/lsu/README.md`](Src/lsu/README.md)                                         | [`Src/lsu/lsu.sv`](Src/lsu/lsu.sv)                                                             | [`Src/lsu/tests/`](Src/lsu/tests/)                                         |
+| Memory Controller  | [`Src/memory_controller/README.md`](Src/memory_controller/README.md)             | [`Src/memory_controller/mem_controller.sv`](Src/memory_controller/mem_controller.sv)           | [`Src/memory_controller/tests/`](Src/memory_controller/tests/)             |
+| PC                 | [`Src/pc/README.md`](Src/pc/README.md)                                           | [`Src/pc/pc.sv`](Src/pc/pc.sv)                                                                 | [`Src/pc/tests/`](Src/pc/tests/)                                           |
+| Registers          | [`Src/registers/README.md`](Src/registers/README.md)                             | [`Src/registers/register_file.sv`](Src/registers/register_file.sv)                             | [`Src/registers/tests/`](Src/registers/tests/)                             |
+| Scheduler          | [`Src/scheduler/README.md`](Src/scheduler/README.md)                             | [`Src/scheduler/scheduler.sv`](Src/scheduler/scheduler.sv)                                     | [`Src/scheduler/tests/`](Src/scheduler/tests/)                             |
+| Warp Stack         | [`Src/warp_stack/README.md`](Src/warp_stack/README.md)                           | [`Src/warp_stack/warp_stack.sv`](Src/warp_stack/warp_stack.sv)                                 | [`Src/warp_stack/tests/`](Src/warp_stack/tests/)                           |
+| Matmul Accelerator | [`Src/matmul_accelerator/README.md`](Src/matmul_accelerator/README.md)           | [`Src/matmul_accelerator/matmul_accelerator.sv`](Src/matmul_accelerator/matmul_accelerator.sv) | [`Src/matmul_accelerator/tests/`](Src/matmul_accelerator/tests/)           |
+| Top-Level GPU      | [`Src/Top_level_GPU/README.md`](Src/Top_level_GPU/README.md)                     | [`Src/Top_level_GPU/top_level_gpu.sv`](Src/Top_level_GPU/top_level_gpu.sv)                     | [`Src/Top_level_GPU/tests/`](Src/Top_level_GPU/tests/)                     |
 
 ---
 
@@ -129,7 +269,20 @@ Supported instructions:
 ```text
 NOP, ADD, SUB, MUL, DIV, MOD, SHL, SHR,
 AND, OR, XOR, NOT, FMA, CMP, BRnzp,
-LDR, STR, CONST, RET, IMUL, SAR, SYNC
+LDR, STR, CONST, RET, IMUL, SAR, SYNC,
+DOT4
+```
+
+Instruction groups:
+
+```text
+Arithmetic:      ADD, SUB, MUL, IMUL, FMA
+Logic:           AND, OR, XOR, NOT
+Shift:           SHL, SHR, SAR
+Control:         CMP, BRnzp, SYNC, RET, NOP
+Memory:          LDR, STR
+Immediate:       CONST
+ML extension:    DOT4
 ```
 
 Full ISA documentation: [`docs/isa.md`](docs/isa.md)
@@ -169,16 +322,17 @@ SYNC triggers warp_stack pop
 saved_mask restored, threads reconverge
 ```
 
-More detail: [`docs/architecture.md`](docs/architecture.md),
-[`Src/warp_stack/README.md`](Src/warp_stack/README.md),
-[`Src/scheduler/README.md`](Src/scheduler/README.md)
+More detail:
+
+* [`docs/architecture.md`](docs/architecture.md)
+* [`Src/warp_stack/README.md`](Src/warp_stack/README.md)
+* [`Src/scheduler/README.md`](Src/scheduler/README.md)
 
 ---
 
 ## Memory Controller
 
-Each core contains a round-robin memory arbiter that serialises
-the 4 per-thread LSU requests into a single memory channel.
+Each core contains a round-robin memory arbiter that serializes the 4 per-thread LSU requests into a single memory channel.
 
 ```text
 THREADS_PER_CORE = 4 LSU ports in
@@ -190,15 +344,117 @@ pending[]:     one-cycle request pulses buffered while busy
 resp_data[]:   packed 2D output [THREADS_PER_CORE-1:0][31:0]
 ```
 
-This means the top-level data memory interface is 4-wide (one port per core),
-not 16-wide (one port per thread). The wrapper only needs to model one BRAM
-per core.
+This means the top-level data memory interface is 4-wide, one port per core, not 16-wide, one port per thread. The wrapper only needs to model one BRAM per core. Thread-level arbitration happens inside each core.
+
+Important memory behavior:
+
+```text
+LDR and STR are word-addressed
+Each active lane may issue a request
+Inactive lanes must not issue memory requests
+The memory controller buffers one-cycle LSU pulses while busy
+Round-robin arbitration prevents fixed-priority starvation
+```
+
+---
+
+## MMIO Matmul Accelerator
+
+Phase 21 adds a memory-mapped matrix multiplication accelerator integrated at the top-level GPU.
+
+Path:
+
+```text
+Src/matmul_accelerator/
+```
+
+Main files:
+
+```text
+Src/matmul_accelerator/matmul_accelerator.sv
+Src/matmul_accelerator/README.md
+Src/matmul_accelerator/tests/
+Src/Top_level_GPU/tests/test_phase21_accel_matmul.py
+assembler/examples/phase21_accel_matmul.c
+```
+
+The accelerator is configured through MMIO registers for:
+
+```text
+A_BASE
+B_BASE
+C_BASE
+M
+N
+K
+SCALE
+START
+STATUS / DONE
+```
+
+Current verified workload:
+
+```text
+A:     4x16
+B:     16x4
+C:     4x4
+scale: arithmetic shift right
+```
+
+Verified output:
+
+```text
+C[0] = [16, 32,  8,  8]
+C[1] = [32, 64, 16, 16]
+C[2] = [28, 56, 16, 12]
+C[3] = [40, 80, 16, 24]
+```
+
+Cycle comparison:
+
+```text
+Phase 20 DOT4 GPU baseline: 342 cycles
+Phase 21 accelerator:       605 cycles
+Delta:                      +263 cycles
+```
+
+The current accelerator is sequential, so it is slower than the parallel DOT4 GPU kernel for this small 4x16 by 16x4 workload. This milestone verifies accelerator integration rather than performance.
+
+The Phase 21 top-level fix also adds accelerator-aware completion gating:
+
+```text
+kernel_done = dispatcher_kernel_done && !accel_inflight
+```
+
+This prevents the GPU from reporting kernel completion while the accelerator is still writing output data.
+
+Run accelerator tests:
+
+```bash
+cd Src/matmul_accelerator
+make
+```
+
+Run top-level Phase 21 test:
+
+```bash
+cd Src/Top_level_GPU
+make COCOTB_TEST_MODULES=tests.test_phase21_accel_matmul
+```
+
+Expected:
+
+```text
+Phase 21 PASSED: 16/16 elements correct
+```
+
+Full documentation: [`Src/matmul_accelerator/README.md`](Src/matmul_accelerator/README.md)
 
 ---
 
 ## AXEL Assembler
 
-AXEL is a C-based assembler that emits `.hex` programs for the GPU.
+AXEL is a C-based assembler that emits `.hex` and `.axelbin` programs for the GPU.
 
 ![Software Layer Architecture](assets/Architecture-images/software_layer_architecture.png)
 
@@ -210,26 +466,47 @@ assembler/include/gpu_asm.h
 assembler/src/axel.c
 assembler/src/gpu_asm.c
 assembler/examples/
-assembler/builds/
+assembler/tools/axelbin.py
 ```
 
-Build and run:
+Build all assembler examples:
 
 ```bash
 cd assembler
 make
 ```
 
-Example kernel (SIMT ReLU):
+Generated kernel artifacts are placed under:
+
+```text
+assembler/builds/hex/
+assembler/builds/bin/
+```
+
+Example generated programs:
+
+```text
+phase6_simt_relu.hex
+phase7_dot4_test.hex
+phase8_mlp_inference.hex
+phase17_q8_matvec_4x4.hex
+phase18_q8_matmul_4x4.hex
+phase19_q8_matmul_4x8.hex
+phase20_q8_matmul_4x16.hex
+phase21_accel_matmul.hex
+```
+
+Example kernel, SIMT ReLU:
 
 ```c
 AxelGPU gpu;
-axel_init(&gpu, 1, 4);          // 1 block, 4 threads
+axel_init(&gpu, 1, 4);              // 1 block, 4 threads
 
-axel_ldr(&gpu, R1, THREAD_IDX, 0);   // load input
-axel_cmp(&gpu, R0, R1);              // compare with 0
+axel_ldr(&gpu, R1, THREAD_IDX, 0);  // load input
+axel_cmp(&gpu, R0, R1);             // compare with 0
 axel_brnzp(&gpu, NZP_N, skip);      // branch if negative
 axel_str(&gpu, R1, THREAD_IDX, 4);  // store result
+
 skip:
 axel_const(&gpu, R1, 0);
 axel_str(&gpu, R1, THREAD_IDX, 4);  // store 0
@@ -243,30 +520,193 @@ Full assembler documentation: [`assembler/README.md`](assembler/README.md)
 
 ---
 
+## axelcc Compiler
+
+`axelcc` is a small C-like compiler for the AXEL GPU.
+
+Path:
+
+```text
+axelcc/
+```
+
+It compiles a restricted kernel-oriented C subset into AXEL GPU machine code and emits:
+
+```text
+.hex
+.axelbin
+```
+
+Main files:
+
+```text
+axelcc/Makefile
+axelcc/README.md
+axelcc/examples/relu.axelc
+axelcc/src/
+```
+
+Compiler pipeline:
+
+```text
+lexer
+parser
+AST
+semantic checks
+simple register allocation
+code generation
+.hex writer
+.axelbin writer
+```
+
+Current verified example:
+
+```c
+kernel void simt_relu() {
+    int tid = threadIdx;
+    int val = mem[tid];
+
+    if (val > 0) {
+        // val remains unchanged
+    } else {
+        val = 0;
+    }
+
+    mem[4 + tid] = val;
+    return;
+}
+```
+
+Build:
+
+```bash
+cd axelcc
+make clean && make
+```
+
+Compile the example ReLU kernel:
+
+```bash
+./axelcc examples/relu.axelc
+```
+
+Generated local outputs:
+
+```text
+relu.hex
+relu.axelbin
+```
+
+Run compiler-generated ReLU on full GPU RTL:
+
+```bash
+cd ~/gpu-project/axelcc
+make clean && make
+./axelcc examples/relu.axelc
+
+cd ~/gpu-project
+mkdir -p assembler/builds/hex assembler/builds/bin
+cp axelcc/relu.hex assembler/builds/hex/axelcc_relu.hex
+cp axelcc/relu.axelbin assembler/builds/bin/axelcc_relu.axelbin
+
+cd Src/Top_level_GPU
+make COCOTB_TEST_MODULES=tests.test_axelcc_relu
+```
+
+Expected result:
+
+```text
+mem[4] = 5 PASS
+mem[5] = 0 PASS
+mem[6] = 8 PASS
+mem[7] = 0 PASS
+axelcc ReLU PASSED
+```
+
+Current language subset:
+
+```text
+kernel void
+int variables
+assignments
+mem[...] load/store
+if/else
+return
+threadIdx
+blockIdx
+blockDim
+dot4()
+fma()
+exp8()
+mmio_matmul() reserved
+```
+
+Current limitations:
+
+```text
+one kernel per source file
+no pointer support
+no local arrays
+no nested if
+no optimizer
+simple register allocation
+no full kernel parameter ABI in RTL flow yet
+```
+
+Full compiler documentation: [`axelcc/README.md`](axelcc/README.md)
+
+---
+
 ## Memory Map
 
-Neural-network workloads use Q8 fixed-point values:
+Neural-network workloads use fixed-point integer values.
+
+For Q8:
 
 ```text
 real_value = q8_value / 256
 q8_value   = round(real_value * 256)
 ```
 
-Main data memory layout (inference kernel):
-
-| Address range | Contents |
-|---|---|
-| `0-15` | `W[4][4]` Q8 weight matrix |
-| `16-19` | `x[4]` Q8 input vector |
-| `20-23` | `y[4]` Q8 output vector |
-| `24-27` | `t[4]` Q8 target vector |
-
 SIMT ReLU kernel layout:
 
-| Address range | Contents |
-|---|---|
-| `0-3` | Input values (signed) |
-| `4-7` | Output values (ReLU applied) |
+| Address range | Contents                    |
+| ------------- | --------------------------- |
+| `0-3`         | Input values, signed        |
+| `4-7`         | Output values, ReLU applied |
+
+Basic MLP layout:
+
+| Address range | Contents                   |
+| ------------- | -------------------------- |
+| `0-15`        | `W[4][4]` Q8 weight matrix |
+| `16-19`       | `x[4]` Q8 input vector     |
+| `20-23`       | `y[4]` Q8 output vector    |
+| `24-27`       | `t[4]` Q8 target vector    |
+
+Phase 17 matvec layout:
+
+| Address range | Contents               |
+| ------------- | ---------------------- |
+| `0-3`         | Packed Q8 matrix rows  |
+| `4`           | Packed Q8 input vector |
+| `5-8`         | Output vector          |
+
+Phase 18 / 19 / 20 matmul layout varies by workload size, but follows:
+
+```text
+A matrix input
+B matrix input
+C matrix output
+```
+
+Phase 21 accelerator test layout:
+
+| Address range | Contents        |
+| ------------- | --------------- |
+| `0x000+`      | Matrix A        |
+| `0x010+`      | Matrix B        |
+| `0x020+`      | Matrix C output |
 
 Full memory documentation: [`docs/memory_map.md`](docs/memory_map.md)
 
@@ -300,11 +740,32 @@ cd Src/Top_level_GPU
 make
 ```
 
-Run only SIMT ReLU (also writes trace_simt_relu.csv):
+Run only SIMT ReLU from the top-level test file:
 
 ```bash
 cd Src/Top_level_GPU
 make COCOTB_TEST_FILTER='test_simt_relu$'
+```
+
+Run only Phase 21 top-level accelerator test:
+
+```bash
+cd Src/Top_level_GPU
+make COCOTB_TEST_MODULES=tests.test_phase21_accel_matmul
+```
+
+Run only axelcc ReLU RTL test:
+
+```bash
+cd Src/Top_level_GPU
+make COCOTB_TEST_MODULES=tests.test_axelcc_relu
+```
+
+Run matmul accelerator standalone tests:
+
+```bash
+cd Src/matmul_accelerator
+make
 ```
 
 Run inference:
@@ -318,22 +779,46 @@ make infer
 
 ## Test Coverage
 
-| Module | Tests | Status |
-|---|---:|---|
-| ALU | 6 | PASS |
-| Registers | 4 | PASS |
-| PC | 5 | PASS |
-| Decoder | 5 | PASS |
-| Fetcher | 3 | PASS |
-| LSU | 3 | PASS |
-| Memory Controller | 3 | PASS |
-| Scheduler | 4 | PASS |
-| Warp Stack | 3 | PASS |
-| Core | 1 | PASS |
-| Dispatcher | 3 | PASS |
-| DCR | 3 | PASS |
-| Top-Level GPU | 2 | PASS |
-| **Total** | **47** | **47/47** |
+| Module / Suite    |   Tests | Status           |
+| ----------------- | ------: | ---------------- |
+| ALU               |      64 | PASS             |
+| Registers         |      21 | PASS             |
+| PC                |      23 | PASS             |
+| Decoder           |      23 | PASS             |
+| Fetcher           |      21 | PASS             |
+| LSU               |      29 | PASS             |
+| Memory Controller |      20 | PASS             |
+| Scheduler         |      25 | PASS             |
+| Core              |      14 | PASS             |
+| Dispatcher        |      19 | PASS             |
+| DCR               |      19 | PASS             |
+| Warp Stack        |      17 | PASS             |
+| Top-Level GPU     |      20 | PASS             |
+| **Total**         | **315** | **315/315 PASS** |
+
+Top-level GPU suite includes:
+
+```text
+test_gpu_axel_program
+test_simt_relu
+test_dot4_kernel
+test_pyaxel_runner
+test_phase08_mlp
+test_phase09_ldr
+test_phase10_mlp_8out
+test_phase11_mlp_8in
+test_phase12_mlp_q6
+test_phase13_digit_hidden
+test_phase14_digit_output
+test_phase15_digit64_hidden
+test_phase16_digit64_classifier
+test_phase17_q8_matvec
+test_phase18_q8_matmul
+test_phase19_q8_matmul_4x8
+test_phase20_q8_matmul_4x16
+test_phase21_accel_matmul
+test_axelcc_relu
+```
 
 ---
 
@@ -349,18 +834,16 @@ Gowin EDA, SV2017 mode
 
 The current FPGA build targets the full SIMT configuration:
 
-| Parameter | Value |
-|---|---|
-| `NUM_CORES` | 4 |
-| `THREADS_PER_CORE` | 4 |
-| `num_blocks` | 1 |
-| `blockDim` | 4 |
-| Clock | 3.375 MHz (27 MHz / 8) |
-| UART | 115200 baud, pin 69 |
+| Parameter          | Value                 |
+| ------------------ | --------------------- |
+| `NUM_CORES`        | 4                     |
+| `THREADS_PER_CORE` | 4                     |
+| `num_blocks`       | 1                     |
+| `blockDim`         | 4                     |
+| Clock              | 3.375 MHz, 27 MHz / 8 |
+| UART               | 115200 baud, pin 69   |
 
-Each core gets one independent program BRAM and one independent data BRAM.
-The round-robin `mem_controller` inside each core handles thread arbitration
-before the request reaches the wrapper.
+Each core gets one independent program BRAM and one independent data BRAM. The round-robin `mem_controller` inside each core handles thread arbitration before the request reaches the wrapper.
 
 Expected UART output after flash:
 
@@ -376,37 +859,37 @@ Full FPGA documentation: [`fpga/README.md`](fpga/README.md)
 
 ## OpenLane / Sky130A GDS
 
-The GPU has been taken through the full RTL-to-GDSII flow twice.
+The GPU has been taken through RTL-to-GDSII using OpenLane 2 and SkyWater Sky130A.
 
 ![GPU Layout](assets/gds/gpu_layout.png)
 
-### SIMT (current)
+### SIMT GPU
 
-| Metric | Value |
-|---|---|
-| Process | SkyWater Sky130A (130 nm) |
-| Standard cell library | sky130_fd_sc_hd |
-| Die area | 7.97 mm² (~2.82 x 2.82 mm) |
-| Core utilization | 27.9% |
-| Total std cells | 300,884 |
-| LVS devices matched | 188,812 |
-| LVS nets matched | 189,107 |
-| Magic DRC violations | **0** |
-| LVS result | **Circuits match uniquely** |
-| Achievable frequency (TT) | **~32.9 MHz** (25°C / 1.80V, post-route SDF STA) |
-| Achievable frequency (SS) | **~18.6 MHz** (100°C / 1.60V, post-route SDF STA) |
-| Critical path | Core datapath mux tree (~31 ns, a2111oi + a31oi) |
-| Tool | OpenLane 2.3.10 |
+| Metric                   | Value                                            |
+| ------------------------ | ------------------------------------------------ |
+| Process                  | SkyWater Sky130A, 130 nm                         |
+| Standard cell library    | sky130_fd_sc_hd                                  |
+| Die area                 | 7.97 mm², approximately 2.82 x 2.82 mm           |
+| Core utilization         | 27.9%                                            |
+| Total std cells          | 300,884                                          |
+| LVS devices matched      | 188,812                                          |
+| LVS nets matched         | 189,107                                          |
+| Magic DRC violations     | **0**                                            |
+| LVS result               | **Circuits match uniquely**                      |
+| Achievable frequency, TT | **~32.9 MHz**, 25°C / 1.80V, post-route SDF STA  |
+| Achievable frequency, SS | **~18.6 MHz**, 100°C / 1.60V, post-route SDF STA |
+| Critical path            | Core datapath mux tree, approximately 31 ns      |
+| Tool                     | OpenLane 2.3.10                                  |
 
-### SIMD (baseline)
+### SIMD Baseline
 
-| Metric | Value |
-|---|---|
-| Standard cells | 204,938 |
-| Chip area | 1.977 mm² |
-| Worst setup slack | +8.01 ns (~59 MHz) |
-| Magic DRC violations | 5 |
-| LVS result | Passed |
+| Metric               | Value                          |
+| -------------------- | ------------------------------ |
+| Standard cells       | 204,938                        |
+| Chip area            | 1.977 mm²                      |
+| Worst setup slack    | +8.01 ns, approximately 59 MHz |
+| Magic DRC violations | 5                              |
+| LVS result           | Passed                         |
 
 Post-route STA scripts and logs: [`sta/`](sta/)
 
@@ -417,18 +900,25 @@ Full GDS documentation: [`gds/README.md`](gds/README.md)
 ## Important Design Rules
 
 1. Keep packed memory response buses aligned across RTL and cocotb.
-   `resp_data` in `mem_controller.sv` must be packed 2D `[THREADS_PER_CORE-1:0][31:0]`.
-2. Register writeback must be gated by scheduler `write_back_en`, decoder `write_back_en`, and `active_mask`.
-3. Inactive SIMT lanes must not issue LSU requests, write registers, or advance PC.
-4. `BRnzp` uses stored NZP from the PC module, not raw ALU output from the current cycle.
-5. The instruction latch in `core.sv` (`instruction_raw` to `instruction`) is required for stable multicycle execution.
-6. LSU request pulses are one cycle wide. The memory controller buffers them in `pending[]` while busy.
+2. `resp_data` in `mem_controller.sv` must be packed 2D: `[THREADS_PER_CORE-1:0][31:0]`.
+3. Register writeback must be gated by scheduler `write_back_en`, decoder `write_back_en`, and `active_mask`.
+4. Inactive SIMT lanes must not issue LSU requests, write registers, or advance PC.
+5. `BRnzp` uses stored NZP from the PC module, not raw ALU output from the current cycle.
+6. The instruction latch in `core.sv`, from `instruction_raw` to `instruction`, is required for stable multicycle execution.
+7. LSU request pulses are one cycle wide.
+8. The memory controller buffers LSU request pulses in `pending[]` while busy.
+9. Accelerator MMIO writes must not be treated as normal data-memory writes.
+10. Accelerator runtime configuration must be latched on `START`, not read live while running.
+11. Top-level `kernel_done` must wait for both dispatcher completion and accelerator completion.
+12. Generated files such as `assembler/builds/`, `sim_build/`, `results.xml`, `axelcc/build/`, `axelcc/*.hex`, and `axelcc/*.axelbin` should not be committed.
 
 Detailed debug history: [`docs/debug_log.md`](docs/debug_log.md)
 
 ---
 
 ## Project Structure
+
+Clean high-level repository structure:
 
 ```text
 32-bit-Tiny-GPU/
@@ -438,34 +928,13 @@ Detailed debug history: [`docs/debug_log.md`](docs/debug_log.md)
 │   ├── Top_level_GPU
 │   │   ├── Makefile
 │   │   ├── README.md
-│   │   ├── __pycache__
-│   │   │   └── test_top_level_gpu.cpython-312-pytest-9.0.3.pyc
 │   │   ├── inference.py
-│   │   ├── results.xml
-│   │   ├── sim_build
-│   │   │   ├── cmds.f
-│   │   │   └── sim.vvp
 │   │   ├── test_top_level_gpu.py
 │   │   ├── tests
 │   │   │   ├── __init__.py
-│   │   │   ├── __pycache__
-│   │   │   │   ├── __init__.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   ├── common.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   ├── memory_models.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   ├── test_phase08_mlp.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   ├── test_phase09_ldr.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   ├── test_phase10_mlp_8out.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   ├── test_phase11_mlp_8in.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   ├── test_phase12_mlp_q6.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   ├── test_phase13_digit_hidden.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   ├── test_phase14_digit_output.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   ├── test_phase15_digit64_hidden.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   ├── test_phase16_digit64_classifier.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   ├── test_phase17_q8_matvec.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   ├── test_phase18_q8_matmul.cpython-312-pytest-9.0.3.pyc
-│   │   │   │   └── test_phase19_q8_matmul_4x8.cpython-312-pytest-9.0.3.pyc
 │   │   │   ├── common.py
 │   │   │   ├── memory_models.py
+│   │   │   ├── test_axelcc_relu.py
 │   │   │   ├── test_phase08_mlp.py
 │   │   │   ├── test_phase09_ldr.py
 │   │   │   ├── test_phase10_mlp_8out.py
@@ -477,269 +946,149 @@ Detailed debug history: [`docs/debug_log.md`](docs/debug_log.md)
 │   │   │   ├── test_phase16_digit64_classifier.py
 │   │   │   ├── test_phase17_q8_matvec.py
 │   │   │   ├── test_phase18_q8_matmul.py
-│   │   │   └── test_phase19_q8_matmul_4x8.py
+│   │   │   ├── test_phase19_q8_matmul_4x8.py
+│   │   │   ├── test_phase20_q8_matmul_4x16.py
+│   │   │   └── test_phase21_accel_matmul.py
 │   │   ├── top_level_gpu.sv
 │   │   └── trace_simt_relu.csv
 │   ├── alu
 │   │   ├── Makefile
 │   │   ├── README.md
-│   │   ├── __pycache__
-│   │   │   └── test_alu.cpython-312-pytest-9.0.3.pyc
 │   │   ├── alu.sv
 │   │   ├── legacy
 │   │   │   └── test_alu_old.py
-│   │   ├── results.xml
-│   │   ├── sim_build
-│   │   │   ├── cmds.f
-│   │   │   └── sim.vvp
 │   │   └── tests
 │   │       ├── __init__.py
-│   │       ├── __pycache__
-│   │       │   ├── __init__.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── common.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── test_alu_directed.cpython-312-pytest-9.0.3.pyc
-│   │       │   └── test_alu_random.cpython-312-pytest-9.0.3.pyc
 │   │       ├── common.py
 │   │       ├── test_alu_directed.py
 │   │       └── test_alu_random.py
 │   ├── core
 │   │   ├── Makefile
 │   │   ├── README.md
-│   │   ├── __pycache__
-│   │   │   └── test_core.cpython-312-pytest-9.0.3.pyc
 │   │   ├── core.sv
 │   │   ├── legacy
 │   │   │   └── test_core_old.py
-│   │   ├── results.xml
-│   │   ├── sim_build
-│   │   │   ├── cmds.f
-│   │   │   └── sim.vvp
 │   │   └── tests
 │   │       ├── __init__.py
-│   │       ├── __pycache__
-│   │       │   ├── __init__.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── common.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── test_core_directed.cpython-312-pytest-9.0.3.pyc
-│   │       │   └── test_core_random.cpython-312-pytest-9.0.3.pyc
 │   │       ├── common.py
 │   │       ├── test_core_directed.py
 │   │       └── test_core_random.py
 │   ├── decoder
 │   │   ├── Makefile
 │   │   ├── README.md
-│   │   ├── __pycache__
-│   │   │   └── test_decoder.cpython-312-pytest-9.0.3.pyc
 │   │   ├── decoder.sv
 │   │   ├── legacy
 │   │   │   └── test_decoder_old.py
-│   │   ├── results.xml
-│   │   ├── sim_build
-│   │   │   ├── cmds.f
-│   │   │   └── sim.vvp
 │   │   └── tests
 │   │       ├── __init__.py
-│   │       ├── __pycache__
-│   │       │   ├── __init__.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── common.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── test_decoder_directed.cpython-312-pytest-9.0.3.pyc
-│   │       │   └── test_decoder_random.cpython-312-pytest-9.0.3.pyc
 │   │       ├── common.py
 │   │       ├── test_decoder_directed.py
 │   │       └── test_decoder_random.py
 │   ├── device_control_register
 │   │   ├── Makefile
 │   │   ├── README.md
-│   │   ├── __pycache__
-│   │   │   └── test_dcr.cpython-312-pytest-9.0.3.pyc
 │   │   ├── dcr.sv
 │   │   ├── legacy
 │   │   │   └── test_dcr_old.py
-│   │   ├── results.xml
-│   │   ├── sim_build
-│   │   │   ├── cmds.f
-│   │   │   └── sim.vvp
 │   │   └── tests
 │   │       ├── __init__.py
-│   │       ├── __pycache__
-│   │       │   ├── __init__.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── common.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── test_dcr_directed.cpython-312-pytest-9.0.3.pyc
-│   │       │   └── test_dcr_random.cpython-312-pytest-9.0.3.pyc
 │   │       ├── common.py
 │   │       ├── test_dcr_directed.py
 │   │       └── test_dcr_random.py
 │   ├── dispatcher
 │   │   ├── Makefile
 │   │   ├── README.md
-│   │   ├── __pycache__
-│   │   │   └── test_dispatcher.cpython-312-pytest-9.0.3.pyc
 │   │   ├── dispatcher.sv
 │   │   ├── legacy
 │   │   │   └── test_dispatcher_old.py
-│   │   ├── results.xml
-│   │   ├── sim_build
-│   │   │   ├── cmds.f
-│   │   │   └── sim.vvp
 │   │   └── tests
 │   │       ├── __init__.py
-│   │       ├── __pycache__
-│   │       │   ├── __init__.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── common.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── test_dispatcher_directed.cpython-312-pytest-9.0.3.pyc
-│   │       │   └── test_dispatcher_random.cpython-312-pytest-9.0.3.pyc
 │   │       ├── common.py
 │   │       ├── test_dispatcher_directed.py
 │   │       └── test_dispatcher_random.py
 │   ├── fetcher
 │   │   ├── Makefile
 │   │   ├── README.md
-│   │   ├── __pycache__
-│   │   │   └── test_fetcher.cpython-312-pytest-9.0.3.pyc
 │   │   ├── fetcher.sv
 │   │   ├── legacy
 │   │   │   └── test_fetcher_old.py
-│   │   ├── results.xml
-│   │   ├── sim_build
-│   │   │   ├── cmds.f
-│   │   │   └── sim.vvp
 │   │   └── tests
 │   │       ├── __init__.py
-│   │       ├── __pycache__
-│   │       │   ├── __init__.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── common.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── test_fetcher_directed.cpython-312-pytest-9.0.3.pyc
-│   │       │   └── test_fetcher_random.cpython-312-pytest-9.0.3.pyc
 │   │       ├── common.py
 │   │       ├── test_fetcher_directed.py
 │   │       └── test_fetcher_random.py
 │   ├── lsu
 │   │   ├── Makefile
 │   │   ├── README.md
-│   │   ├── __pycache__
-│   │   │   └── test_lsu.cpython-312-pytest-9.0.3.pyc
 │   │   ├── legacy
 │   │   │   └── test_lsu_old.py
 │   │   ├── lsu.sv
-│   │   ├── results.xml
-│   │   ├── sim_build
-│   │   │   ├── cmds.f
-│   │   │   └── sim.vvp
 │   │   └── tests
 │   │       ├── __init__.py
-│   │       ├── __pycache__
-│   │       │   ├── __init__.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── common.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── test_lsu_directed.cpython-312-pytest-9.0.3.pyc
-│   │       │   └── test_lsu_random.cpython-312-pytest-9.0.3.pyc
 │   │       ├── common.py
 │   │       ├── test_lsu_directed.py
 │   │       └── test_lsu_random.py
+│   ├── matmul_accelerator
+│   │   ├── Makefile
+│   │   ├── README.md
+│   │   ├── matmul_accelerator.sv
+│   │   └── tests
+│   │       ├── __init__.py
+│   │       ├── common.py
+│   │       ├── test_matmul_directed.py
+│   │       ├── test_matmul_edge.py
+│   │       └── test_matmul_random.py
 │   ├── memory_controller
 │   │   ├── Makefile
 │   │   ├── README.md
-│   │   ├── __pycache__
-│   │   │   └── test_mem_controller.cpython-312-pytest-9.0.3.pyc
 │   │   ├── legacy
 │   │   │   └── test_mem_controller_old.py
 │   │   ├── mem_controller.sv
-│   │   ├── results.xml
-│   │   ├── sim_build
-│   │   │   ├── cmds.f
-│   │   │   └── sim.vvp
 │   │   └── tests
 │   │       ├── __init__.py
-│   │       ├── __pycache__
-│   │       │   ├── __init__.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── common.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── test_mem_controller_directed.cpython-312-pytest-9.0.3.pyc
-│   │       │   └── test_mem_controller_random.cpython-312-pytest-9.0.3.pyc
 │   │       ├── common.py
 │   │       ├── test_mem_controller_directed.py
 │   │       └── test_mem_controller_random.py
 │   ├── pc
 │   │   ├── Makefile
 │   │   ├── README.md
-│   │   ├── __pycache__
-│   │   │   └── test_pc.cpython-312-pytest-9.0.3.pyc
 │   │   ├── legacy
 │   │   │   └── test_pc_old.py
 │   │   ├── pc.sv
-│   │   ├── results.xml
-│   │   ├── sim_build
-│   │   │   ├── cmds.f
-│   │   │   └── sim.vvp
 │   │   └── tests
 │   │       ├── __init__.py
-│   │       ├── __pycache__
-│   │       │   ├── __init__.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── common.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── test_pc_directed.cpython-312-pytest-9.0.3.pyc
-│   │       │   └── test_pc_random.cpython-312-pytest-9.0.3.pyc
 │   │       ├── common.py
 │   │       ├── test_pc_directed.py
 │   │       └── test_pc_random.py
 │   ├── registers
 │   │   ├── Makefile
 │   │   ├── README.md
-│   │   ├── __pycache__
-│   │   │   └── test_registers.cpython-312-pytest-9.0.3.pyc
 │   │   ├── legacy
 │   │   │   └── test_registers_old.py
 │   │   ├── register_file.sv
-│   │   ├── results.xml
-│   │   ├── sim_build
-│   │   │   ├── cmds.f
-│   │   │   └── sim.vvp
 │   │   └── tests
 │   │       ├── __init__.py
-│   │       ├── __pycache__
-│   │       │   ├── __init__.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── common.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── test_registers_directed.cpython-312-pytest-9.0.3.pyc
-│   │       │   └── test_registers_random.cpython-312-pytest-9.0.3.pyc
 │   │       ├── common.py
 │   │       ├── test_registers_directed.py
 │   │       └── test_registers_random.py
 │   ├── scheduler
 │   │   ├── Makefile
 │   │   ├── README.md
-│   │   ├── __pycache__
-│   │   │   └── test_scheduler.cpython-312-pytest-9.0.3.pyc
 │   │   ├── legacy
 │   │   │   └── test_scheduler_old.py
-│   │   ├── results.xml
 │   │   ├── scheduler.sv
-│   │   ├── sim_build
-│   │   │   ├── cmds.f
-│   │   │   └── sim.vvp
 │   │   └── tests
 │   │       ├── __init__.py
-│   │       ├── __pycache__
-│   │       │   ├── __init__.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── common.cpython-312-pytest-9.0.3.pyc
-│   │       │   ├── test_scheduler_directed.cpython-312-pytest-9.0.3.pyc
-│   │       │   └── test_scheduler_random.cpython-312-pytest-9.0.3.pyc
 │   │       ├── common.py
 │   │       ├── test_scheduler_directed.py
 │   │       └── test_scheduler_random.py
 │   └── warp_stack
 │       ├── Makefile
 │       ├── README.md
-│       ├── __pycache__
-│       │   └── test_warp_stack.cpython-312-pytest-9.0.3.pyc
 │       ├── legacy
 │       │   └── test_warp_stack_old.py
-│       ├── results.xml
-│       ├── sim_build
-│       │   ├── cmds.f
-│       │   └── sim.vvp
 │       ├── tests
 │       │   ├── __init__.py
-│       │   ├── __pycache__
-│       │   │   ├── __init__.cpython-312-pytest-9.0.3.pyc
-│       │   │   ├── common.cpython-312-pytest-9.0.3.pyc
-│       │   │   ├── test_warp_stack_directed.cpython-312-pytest-9.0.3.pyc
-│       │   │   └── test_warp_stack_random.cpython-312-pytest-9.0.3.pyc
 │       │   ├── common.py
 │       │   ├── test_warp_stack_directed.py
 │       │   └── test_warp_stack_random.py
@@ -747,70 +1096,6 @@ Detailed debug history: [`docs/debug_log.md`](docs/debug_log.md)
 ├── assembler
 │   ├── Makefile
 │   ├── README.md
-│   ├── builds
-│   │   ├── bin
-│   │   │   ├── phase10_mlp_8out.axelbin
-│   │   │   ├── phase11_mlp_8in.axelbin
-│   │   │   ├── phase12_mlp_q6.axelbin
-│   │   │   ├── phase13_digit_hidden.axelbin
-│   │   │   ├── phase14_digit_output.axelbin
-│   │   │   ├── phase15_digit64_hidden.axelbin
-│   │   │   ├── phase16_digit64_output.axelbin
-│   │   │   ├── phase17_q8_matvec_4x4.axelbin
-│   │   │   ├── phase18_q8_matmul_4x4.axelbin
-│   │   │   ├── phase19_q8_matmul_4x8.axelbin
-│   │   │   ├── phase1_ldr_test.axelbin
-│   │   │   ├── phase2_matmul.axelbin
-│   │   │   ├── phase3_relu.axelbin
-│   │   │   ├── phase4_forward.axelbin
-│   │   │   ├── phase5_weight_update.axelbin
-│   │   │   ├── phase6_simt_relu.axelbin
-│   │   │   ├── phase7_dot4_test.axelbin
-│   │   │   ├── phase8_mlp_inference.axelbin
-│   │   │   ├── phase9_ldr_regbase_broadcast.axelbin
-│   │   │   └── phase9_ldr_regbase_single.axelbin
-│   │   ├── hex
-│   │   │   ├── phase10_mlp_8out.hex
-│   │   │   ├── phase11_mlp_8in.hex
-│   │   │   ├── phase12_mlp_q6.hex
-│   │   │   ├── phase13_digit_hidden.hex
-│   │   │   ├── phase14_digit_output.hex
-│   │   │   ├── phase15_digit64_hidden.hex
-│   │   │   ├── phase16_digit64_output.hex
-│   │   │   ├── phase17_q8_matvec_4x4.hex
-│   │   │   ├── phase18_q8_matmul_4x4.hex
-│   │   │   ├── phase19_q8_matmul_4x8.hex
-│   │   │   ├── phase1_ldr_test.hex
-│   │   │   ├── phase2_matmul.hex
-│   │   │   ├── phase3_relu.hex
-│   │   │   ├── phase4_forward.hex
-│   │   │   ├── phase5_weight_update.hex
-│   │   │   ├── phase6_simt_relu.hex
-│   │   │   ├── phase7_dot4_test.hex
-│   │   │   ├── phase8_mlp_inference.hex
-│   │   │   ├── phase9_ldr_regbase_broadcast.hex
-│   │   │   └── phase9_ldr_regbase_single.hex
-│   │   ├── phase1
-│   │   ├── phase10
-│   │   ├── phase11
-│   │   ├── phase12
-│   │   ├── phase13
-│   │   ├── phase14
-│   │   ├── phase15
-│   │   ├── phase16
-│   │   ├── phase17
-│   │   ├── phase18
-│   │   ├── phase19
-│   │   ├── phase2
-│   │   ├── phase3
-│   │   ├── phase4
-│   │   ├── phase5
-│   │   ├── phase6
-│   │   ├── phase7
-│   │   ├── phase8
-│   │   ├── phase9_broadcast
-│   │   ├── phase9_single
-│   │   └── weights.json
 │   ├── examples
 │   │   ├── phase10_mlp_8out.c
 │   │   ├── phase11_mlp_8in.c
@@ -823,6 +1108,8 @@ Detailed debug history: [`docs/debug_log.md`](docs/debug_log.md)
 │   │   ├── phase18_q8_matmul_4x4.c
 │   │   ├── phase19_q8_matmul_4x8.c
 │   │   ├── phase1_ldr_test.c
+│   │   ├── phase20_q8_matmul_4x16.c
+│   │   ├── phase21_accel_matmul.c
 │   │   ├── phase2_matmul.c
 │   │   ├── phase3_relu.c
 │   │   ├── phase4_forward.c
@@ -841,8 +1128,6 @@ Detailed debug history: [`docs/debug_log.md`](docs/debug_log.md)
 │   │   ├── axel.c
 │   │   └── gpu_asm.c
 │   └── tools
-│       ├── __pycache__
-│       │   └── axelbin.cpython-312-pytest-9.0.3.pyc
 │       └── axelbin.py
 ├── assets
 │   ├── Architecture-images
@@ -879,6 +1164,39 @@ Detailed debug history: [`docs/debug_log.md`](docs/debug_log.md)
 │   │   └── warp_stack.pdf
 │   └── gds
 │       └── gpu_layout.png
+├── axelcc
+│   ├── Makefile
+│   ├── README.md
+│   ├── axelcc
+│   ├── build
+│   │   ├── ast.o
+│   │   ├── codegen.o
+│   │   ├── emit.o
+│   │   ├── lexer.o
+│   │   ├── main.o
+│   │   ├── parser.o
+│   │   ├── sema.o
+│   │   └── writer.o
+│   ├── examples
+│   │   └── relu.axelc
+│   ├── relu.axelbin
+│   ├── relu.hex
+│   └── src
+│       ├── ast.c
+│       ├── ast.h
+│       ├── codegen.c
+│       ├── codegen.h
+│       ├── emit.c
+│       ├── emit.h
+│       ├── lexer.c
+│       ├── lexer.h
+│       ├── main.c
+│       ├── parser.c
+│       ├── parser.h
+│       ├── sema.c
+│       ├── sema.h
+│       ├── writer.c
+│       └── writer.h
 ├── docs
 │   ├── ai_inference_milestones.md
 │   ├── architecture.md
@@ -1036,37 +1354,126 @@ Detailed debug history: [`docs/debug_log.md`](docs/debug_log.md)
     ├── sta_tt.log
     └── sta_tt.tcl
 ```
+
+Generated folders are intentionally omitted from this clean tree.
+
+Common generated paths:
+
+```text
+assembler/builds/
+axelcc/build/
+axelcc/axelcc
+axelcc/*.hex
+axelcc/*.axelbin
+sim_build/
+__pycache__/
+results.xml
+*.vcd
+```
+
+---
+
+## Clean Generated Files
+
+Remove simulation and Python cache outputs:
+
+```bash
+find . -type d -name "__pycache__" -prune -exec rm -rf {} +
+find . -type d -name "sim_build" -prune -exec rm -rf {} +
+find . -name "results.xml" -delete
+find . -name "*.vcd" -delete
+```
+
+Clean axelcc outputs:
+
+```bash
+cd axelcc
+make clean
+rm -f *.hex *.axelbin
+```
+
+Clean assembler outputs:
+
+```bash
+rm -rf assembler/builds/
+```
+
+Rebuild assembler outputs:
+
+```bash
+cd assembler
+make
+```
+
 ---
 
 ## Known Limitations
 
-- Program and data memories are modeled in cocotb for simulation (no RTL SRAM block).
-- Memory is word-addressed only. Byte-addressable access is not implemented.
-- Branch offsets are unsigned forward-only. Backward branches require assembler workarounds.
-- `CONST` loads a 16-bit zero-extended immediate only. No sign-extension variant.
-- `DIV` and `MOD` are replaced with `32'b0` in the synthesis target (no hardware divider on Sky130A).
-- `kernel_done` is sticky until reset. Repeated kernel launches require a full reset cycle.
-- Critical path is a wide mux tree through `a2111oi_2` and `a31oi_2` cells, limiting TT frequency to ~32.9 MHz. A floorplan re-run with tighter placement constraints is planned.
+* Program and data memories are modeled in cocotb for simulation.
+* No dedicated RTL SRAM macro is integrated yet.
+* Memory is word-addressed only.
+* Byte-addressable memory access is not implemented.
+* Branch offsets are currently simple and mostly forward-oriented in the assembler/compiler flow.
+* `CONST` loads a 16-bit zero-extended immediate only.
+* No sign-extending immediate instruction exists yet.
+* `DIV` and `MOD` are replaced with `32'b0` in the synthesis target.
+* `kernel_done` behavior must be handled carefully around repeated launches.
+* The Phase 21 accelerator is sequential and currently not optimized for throughput.
+* `axelcc` has no full kernel parameter ABI in the RTL test flow yet.
+* `axelcc` has no optimizer and uses simple register allocation.
+* Critical path is a wide mux tree through complex cells, limiting TT frequency to approximately 32.9 MHz.
+* Floorplan and placement optimization are still future work.
 
 ---
 
-## Future Work
+## Current Roadmap
 
-- Tighten floorplan to reduce 7.97 mm² die area and improve critical path
-- Implement AXEL-C compiler (C subset to AXEL assembly)
-- Flash and verify FPGA SIMT build on Tang Nano 20K
-- Implement DIV/MOD as iterative multi-cycle hardware units
-- UVM verification suite
-- Cadence Genus/Xcelium synthesis (pending lab access)
-- Phase 1: AI ISA extensions (DOT4, RELU, CLAMP, ARGMAX)
-- Phase 2: Q8 neural network inference on GPU
-- Phase 4: Memory-mapped matmul accelerator
+Completed:
+
+```text
+32-bit SIMT GPU RTL
+Warp-stack divergence/reconvergence
+Round-robin memory controller
+DOT4 instruction
+Q8 fixed-point ML kernels
+True 64->16 hidden layer
+64->16->10 classifier workload
+Phase 20 tiled Q8 matmul
+Phase 21 MMIO matmul accelerator
+axelcc compiler frontend/backend
+axelcc ReLU verified on full GPU RTL
+Tang Nano 20K FPGA target files
+Sky130A OpenLane GDS flow
+Post-route STA
+```
+
+Next:
+
+```text
+Add axelcc DOT4 examples
+Add axelcc-generated Q8 matvec
+Add axelcc-generated Q8 matmul
+Integrate axelcc MMIO matmul builtin
+Define kernel parameter ABI
+Begin transformer-style kernels
+Improve compiler register allocation
+Add compiler golden-output tests
+Add constant folding
+Add dead-code elimination
+Add local array support
+Improve accelerator throughput
+Explore pipelined / tiled accelerator design
+Tighten OpenLane floorplan
+Improve critical path timing
+Flash and verify FPGA build on Tang Nano 20K
+```
 
 ---
 
 ## Author
 
-**Austin Antony**
+**Antony Austin**
 B.Tech Applied Electronics and Instrumentation Engineering
 Rajagiri School of Engineering and Technology
-CTO and Co-founder, Virtusco
+
+Project: custom 32-bit SIMT GPU with AXEL assembler, axelcc compiler, ML kernels, MMIO accelerator integration, FPGA targeting, and ASIC GDS flow.
