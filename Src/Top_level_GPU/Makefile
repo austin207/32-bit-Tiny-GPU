@@ -2,6 +2,7 @@ TOPLEVEL_LANG = verilog
 
 VERILOG_SOURCES = $(shell pwd)/top_level_gpu.sv \
                   $(shell pwd)/../warp_stack/warp_stack.sv \
+                  $(shell pwd)/../matmul_accelerator/matmul_accelerator.sv \
                   $(shell pwd)/../memory_controller/mem_controller.sv \
                   $(shell pwd)/../device_control_register/dcr.sv \
                   $(shell pwd)/../dispatcher/dispatcher.sv \
@@ -19,7 +20,7 @@ SIM = icarus
 
 export PYTHONPATH := $(shell pwd):$(PYTHONPATH)
 
-COCOTB_TEST_MODULES ?= test_top_level_gpu,tests.test_phase08_mlp,tests.test_phase09_ldr,tests.test_phase10_mlp_8out,tests.test_phase11_mlp_8in,tests.test_phase12_mlp_q6,tests.test_phase13_digit_hidden,tests.test_phase14_digit_output,tests.test_phase15_digit64_hidden,tests.test_phase16_digit64_classifier,tests.test_phase17_q8_matvec,tests.test_phase18_q8_matmul,tests.test_phase19_q8_matmul_4x8,tests.test_phase20_q8_matmul_4x16
+COCOTB_TEST_MODULES ?= test_top_level_gpu,tests.test_phase08_mlp,tests.test_phase09_ldr,tests.test_phase10_mlp_8out,tests.test_phase11_mlp_8in,tests.test_phase12_mlp_q6,tests.test_phase13_digit_hidden,tests.test_phase14_digit_output,tests.test_phase15_digit64_hidden,tests.test_phase16_digit64_classifier,tests.test_phase17_q8_matvec,tests.test_phase18_q8_matmul,tests.test_phase19_q8_matmul_4x8,tests.test_phase20_q8_matmul_4x16,tests.test_phase21_accel_matmul,tests.test_axelcc_relu
 
 include $(shell cocotb-config --makefiles)/Makefile.sim
 

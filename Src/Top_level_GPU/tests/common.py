@@ -58,7 +58,11 @@ def init_bus(dut):
         dut.prog_mem_resp_data[i].value = 0
 
     dut.data_mem_resp_valid.value = 0
-    dut.data_mem_resp_data.value = 0
+    dut.data_mem_resp_data.value  = 0
+
+    # Phase 4: accelerator matrix data port
+    dut.accel_data_resp_valid.value = 0
+    dut.accel_data_resp_data.value  = 0
 
 
 async def reset_gpu(dut):

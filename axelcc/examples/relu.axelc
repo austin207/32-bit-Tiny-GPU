@@ -1,0 +1,23 @@
+// relu.axelc
+// Phase 6 SIMT ReLU expressed in axelcc syntax.
+// Hardcoded memory layout for current GPU testbench ABI:
+//
+// input:
+//   mem[0..3]
+//
+// output:
+//   mem[4..7]
+
+kernel void simt_relu() {
+    int tid = threadIdx;
+    int val = mem[tid];
+
+    if (val > 0) {
+        // val remains unchanged
+    } else {
+        val = 0;
+    }
+
+    mem[4 + tid] = val;
+    return;
+}

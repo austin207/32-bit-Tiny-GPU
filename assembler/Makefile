@@ -6,9 +6,9 @@ BUILD  = builds
 HEX    = builds/hex
 BIN    = builds/bin
 
-.PHONY: all clean test_add test_axel phase1 phase2 phase3 phase4 phase5 phase6 phase7 phase8 phase9_single phase9_broadcast phase10 phase11 phase12 phase13 phase14 phase15 phase16 phase17 phase18 phase19 phase20
+.PHONY: all clean test_add test_axel phase1 phase2 phase3 phase4 phase5 phase6 phase7 phase8 phase9_single phase9_broadcast phase10 phase11 phase12 phase13 phase14 phase15 phase16 phase17 phase18 phase19 phase20 phase21
 
-all: phase1 phase2 phase3 phase4 phase5 phase6 phase7 phase8 phase9_single phase9_broadcast phase10 phase11 phase12 phase13 phase14 phase15 phase16 phase17 phase18 phase19 phase20
+all: phase1 phase2 phase3 phase4 phase5 phase6 phase7 phase8 phase9_single phase9_broadcast phase10 phase11 phase12 phase13 phase14 phase15 phase16 phase17 phase18 phase19 phase20 phase21
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -110,6 +110,10 @@ phase20:
 	mkdir -p builds/hex builds/bin
 	gcc -Wall -Iinclude examples/phase20_q8_matmul_4x16.c src/axel.c src/gpu_asm.c -o builds/phase20
 	cd builds && ./phase20
+
+phase21: $(BUILD)
+	$(CC) $(CFLAGS) examples/phase21_accel_matmul.c $(SRCS) -o $(BUILD)/phase21
+	cd $(BUILD) && ./phase21
 
 clean:
 	rm -rf $(BUILD)

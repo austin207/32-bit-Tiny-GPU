@@ -2,6 +2,11 @@ from cocotb.triggers import RisingEdge, Timer
 
 from tests.common import NUM_CORES, safe_int, safe_bit
 
+# Addresses >= ACCEL_CTRL_BASE are ctrl registers handled by the RTL mux.
+# The data_memory_model must skip them to avoid polluting the Python dict
+# and asserting spurious resp_valid for those cores.
+ACCEL_CTRL_BASE = 0x1F0
+
 
 async def program_memory_model(
     dut,
@@ -65,6 +70,10 @@ async def data_memory_model(
     """
     Data memory model with optional debug.
 
+    Addresses >= ACCEL_CTRL_BASE (0x1F0) are skipped: the RTL address-decode
+    mux in top_level_gpu intercepts those requests and serves them from the
+    matmul_accelerator ctrl registers directly.
+
     debug=True enables memory transaction prints.
     Filter with:
         debug_addr_min=0
@@ -106,6 +115,16 @@ async def data_memory_model(
                     print(f"[DMEM] core={core_id} error: {e}")
                 continue
 
+            # ── Phase 4: skip ctrl reg space — RTL handles these internally ──
+            if addr >= ACCEL_CTRL_BASE:
+                if debug:
+                    op = "READ" if rw else "WRITE"
+                    print(
+                        f"[DMEM] core={core_id} thread={thread_id} "
+                        f"{op} ctrl_reg[0x{addr:03X}] — skipped (RTL mux)"
+                    )
+                continue  # do NOT write dict; do NOT assert resp_valid
+
             if rw == 0:
                 memory[addr] = data & 0xFFFFFFFF
                 resp_data_per_core[core_id] = 0
@@ -135,3 +154,45 @@ async def data_memory_model(
             packed |= (resp_data_per_core[core_id] & 0xFFFFFFFF) << (core_id * 32)
 
         dut.data_mem_resp_data.value = packed
+
+
+async def accel_data_memory_model(
+    dut,
+    memory,
+    *,
+    debug=False,
+):
+    """
+    Data memory model for the matmul accelerator's dedicated matrix I/O port.
+
+    Serves dut.accel_data_req_* / drives dut.accel_data_resp_*.
+    Shares the same Python dict as data_memory_model so the accelerator
+    reads A/B from the same memory the GPU kernel set up, and writes C
+    back to the same memory the test verifies.
+    """
+    while True:
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
+
+        dut.accel_data_resp_valid.value = 0
+        dut.accel_data_resp_data.value  = 0
+
+        if safe_int(dut.accel_data_req_valid, 0) == 0:
+            continue
+
+        addr = safe_int(dut.accel_data_req_addr, 0)
+        rw   = safe_int(dut.accel_data_req_rw,   0)   # 1=read, 0=write
+        data = safe_int(dut.accel_data_req_data,  0)
+
+        if rw == 0:   # write
+            memory[addr] = data & 0xFFFFFFFF
+            dut.accel_data_resp_data.value = 0
+            if debug:
+                print(f"[ACCEL_DMEM] WRITE mem[{addr}] <= 0x{data & 0xFFFFFFFF:08x}")
+        else:         # read
+            val = memory.get(addr, 0) & 0xFFFFFFFF
+            dut.accel_data_resp_data.value = val
+            if debug:
+                print(f"[ACCEL_DMEM] READ  mem[{addr}] => 0x{val:08x}")
+
+        dut.accel_data_resp_valid.value = 1

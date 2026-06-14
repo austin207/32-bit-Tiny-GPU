@@ -23,3 +23,9 @@ assembler/builds/
 schematics/_build/
 schematics/logs/
 schematics/json/
+
+# axelcc generated files
+axelcc/axelcc
+axelcc/build/
+axelcc/*.hex
+axelcc/*.axelbin
