@@ -19,6 +19,7 @@ TEST_DIRS := \
 
 assembler:
 	$(MAKE) -C assembler
+	$(MAKE) -C axelcc examples
 
 test: assembler
 	@set -e; \
@@ -34,6 +35,7 @@ infer: assembler
 
 clean:
 	$(MAKE) -C assembler clean || true
+	$(MAKE) -C axelcc clean || true
 	@for dir in $(TEST_DIRS); do \
 		echo "Cleaning $$dir"; \
 		$(MAKE) -C $$dir clean || true; \

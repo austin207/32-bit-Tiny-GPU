@@ -41,7 +41,10 @@ async def test_random_branch_taken_offsets(dut):
         await store_nzp(dut, flag)
         await branch_cycle(dut, flag, offset)
 
-        expected_pc = u32(expected_pc + offset)
+        # branch_offset is a signed 12-bit field (pc.sv sign-extends it
+        # before adding), so raw values >= 0x800 are negative offsets.
+        signed_offset = offset - 0x1000 if offset & 0x800 else offset
+        expected_pc = u32(expected_pc + signed_offset)
 
         assert_pc(dut, expected_pc, f"random branch taken iter={i}")
 
