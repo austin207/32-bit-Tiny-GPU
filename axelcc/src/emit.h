@@ -23,6 +23,7 @@ void emit_and  (InstrBuf *b, int rd, int rs1, int rs2);
 void emit_or   (InstrBuf *b, int rd, int rs1, int rs2);
 void emit_xor  (InstrBuf *b, int rd, int rs1, int rs2);
 void emit_fma  (InstrBuf *b, int rd, int rs1, int rs2, int rs3);
+void emit_dot  (InstrBuf *b, int rd, int rs1, int rs2, int rs3);
 void emit_cmp  (InstrBuf *b, int rs1, int rs2);
 void emit_ldr  (InstrBuf *b, int rd, int rs, int imm);
 void emit_str  (InstrBuf *b, int rd, int rs, int imm);

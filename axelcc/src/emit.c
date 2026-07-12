@@ -50,6 +50,7 @@ void emit_and  (InstrBuf *b, int rd, int rs1, int rs2) { push(b, r_type(0x08,rd,
 void emit_or   (InstrBuf *b, int rd, int rs1, int rs2) { push(b, r_type(0x09,rd,rs1,rs2)); }
 void emit_xor  (InstrBuf *b, int rd, int rs1, int rs2) { push(b, r_type(0x0A,rd,rs1,rs2)); }
 void emit_fma  (InstrBuf *b, int rd, int rs1, int rs2, int rs3) { push(b, r4_type(0x0C,rd,rs1,rs2,rs3)); }
+void emit_dot  (InstrBuf *b, int rd, int rs1, int rs2, int rs3) { push(b, r4_type(0x16,rd,rs1,rs2,rs3)); }
 void emit_cmp  (InstrBuf *b, int rs1, int rs2) { push(b, r_type(0x0D,0,rs1,rs2)); }
 void emit_ldr  (InstrBuf *b, int rd, int rs,  int imm) { push(b, i_type(0x0F,rd,rs,imm)); }
 void emit_str  (InstrBuf *b, int rd, int rs,  int imm) { push(b, i_type(0x10,rd,rs,imm)); }

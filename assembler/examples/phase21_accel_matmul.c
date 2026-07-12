@@ -80,7 +80,7 @@ int main() {
     /* ── Poll loop: spin while DONE=0 ──────────────────────────────────── */
     /* PC 16 */ axel_ldr  (&gpu, R3, R0, 0x1F8);  /* R3 = DONE register   */
     /* PC 17 */ axel_cmp  (&gpu, R3, R0);          /* CMP R3, 0            */
-    /* PC 18 */ axel_brnzp(&gpu, AXEL_Z, 0, -3);   /* if Z (DONE=0) → PC 16 */
+    /* PC 18 */ axel_brnzp(&gpu, AXEL_Z, 0, -2);   /* if Z (DONE=0) → PC 16, under real target=branch_pc+offset semantics */
     /* PC 19 */ axel_ret  (&gpu);                   /* DONE=1, exit         */
 
     /* ── Matrix data (same as phase20) ─────────────────────────────────── */

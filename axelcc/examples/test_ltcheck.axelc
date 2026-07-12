@@ -1,0 +1,11 @@
+kernel void ltcheck() {
+    int a = mem[0];
+    int b = mem[1];
+    int r = 0;
+    if (a < b) {
+        r = 1;
+    } else {
+        r = 0;
+    }
+    mem[2] = r;
+}

@@ -30,7 +30,7 @@ always_ff @(posedge clk or posedge rst) begin
             nzp_reg <= nzp_flag;
         if (pc_en) begin
             if (branch_en && (nzp_reg & nzp_mask) != 0)
-                pc_out <= pc_out + branch_offset;
+                pc_out <= pc_out + {{20{branch_offset[11]}}, branch_offset};
             else
                 pc_out <= pc_out + 1;
         end

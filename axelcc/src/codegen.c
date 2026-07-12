@@ -63,7 +63,7 @@ static int nzp_for_op(int op) {
 }
 
 /* Invert a 3-bit NZP mask. */
-static int nzp_invert(int mask) { return (~mask) & 0x7; }
+//static int nzp_invert(int mask) { return (~mask) & 0x7; }
 
 /* Build and patch a BRnzp word back into the buffer. */
 static void patch_brnzp(InstrBuf *buf, int idx, int nzp, int sync_off, int branch_off) {
@@ -149,11 +149,15 @@ static int eval_expr(CGen *g, const Expr *e) {
         }
 
         case EXPR_DOT4: {
-            /* dot4(a, b) = fma(a, b, 0) -- packed INT8 multiply */
+            /* dot4(a, b) = packed INT8x4 dot product, alu.sv 6'h16:
+             * result = rs3 + (a0*b0 + a1*b1 + a2*b2 + a3*b3) over the four
+             * signed INT8 lanes of a/b. Not FMA (6'h0C, plain scalar
+             * multiply-add) -- that was silently producing a scalar
+             * multiply instead of a packed dot product. */
             int a = eval_expr(g, e->dot4.a);
             int b = eval_expr(g, e->dot4.b);
             int dst = alloc_tmp(g);
-            emit_fma(g->buf, dst, a, b, R0);
+            emit_dot(g->buf, dst, a, b, R0);
             return dst;
         }
 
@@ -207,13 +211,35 @@ static void emit_stmt(CGen *g, const Stmt *s) {
          *
          * Layout (taken-group-first):
          *   CMP lhs, rhs
-         *   BRnzp cond_mask, S, B          <── backpatch: S = B = 1 + len_else
+         *   BRnzp cond_mask, S1, B1        <── backpatch: S1=B1=2+len_else
          *   [else body]                     <── NOT-TAKEN (falls through)
-         *   SYNC                            <── first SYNC
-         *   [then body]                     <── TAKEN (jumps here)
+         *   BRnzp ALL, S2, B2               <── unconditional skip; backpatch: S2=B2=2+len_then
+         *   SYNC                            <── first SYNC (TAKEN lands here, falls into then body)
+         *   [then body]
          *   SYNC                            <── second SYNC (full reconvergence)
          *
-         * For no-else: else body is empty → S = B = 1, two adjacent SYNCs.
+         * Each thread's PC advances on its own NZP every cycle regardless of
+         * the scheduler's divergence detection (core.sv: pc_en & active_mask[i]
+         * gates PC update, but branch/fallthrough decision is per-thread NZP).
+         * Divergence detection only decides which threads get frozen
+         * afterward -- it has no bearing on whether a single/uniform thread
+         * follows its own branch. So without the unconditional skip, a
+         * not-taken thread has nothing to jump over the then body with: it
+         * just walks CMP -> BRnzp(no-op) -> else body -> SYNC(no-op) ->
+         * then body too, and the then body's write wins last. Confirmed by
+         * direct hex trace of test_ifelse (a<b case): mem[2] held the THEN
+         * body's result even though the ELSE body ran first.
+         *
+         * The added unconditional BRnzp is always taken uniformly by
+         * whichever group currently holds active_mask (nzp_mask=ALL always
+         * matches, since nzp_stored is never 3'b000), so taken_mask ==
+         * active_mask and divergence_detected never fires for it -- it does
+         * not disturb the real-divergence taken-group-first/warp-stack
+         * mechanism (traced against scheduler.sv DIVERGE/SYNC_POP timing;
+         * test_simt_relu's genuine per-thread divergence is unaffected).
+         *
+         * For no-else: else body is empty, S1=B1=2, two adjacent branches
+         * before the first SYNC.
          */
         case STMT_IF: {
             const Expr *cond = s->if_stmt.cond;
@@ -230,16 +256,26 @@ static void emit_stmt(CGen *g, const Stmt *s) {
             emit_stmtlist(g, s->if_stmt.else_body);
             int len_else = g->buf->count - else_start;
 
+            /* unconditional skip over the then body, for the not-taken path */
+            int skip_idx = g->buf->count;
+            emit_brnzp(g->buf, NZP_ALL, 0, 0);   /* placeholder */
+
             emit_sync(g->buf);   /* first SYNC */
 
             /* then (taken) body */
+            int then_start = g->buf->count;
             emit_stmtlist(g, s->if_stmt.then_body);
+            int len_then = g->buf->count - then_start;
 
             emit_sync(g->buf);   /* second SYNC */
 
-            /* backpatch: sync_offset = branch_offset = 1 + len_else */
-            int off = 1 + len_else;
-            patch_brnzp(g->buf, brnzp_idx, nzp, off, off);
+            /* backpatch: cond branch targets the first SYNC (lands, falls into then body) */
+            int off1 = 2 + len_else;
+            patch_brnzp(g->buf, brnzp_idx, nzp, off1, off1);
+
+            /* backpatch: unconditional skip targets the second SYNC */
+            int off2 = 2 + len_then;
+            patch_brnzp(g->buf, skip_idx, NZP_ALL, off2, off2);
             break;
         }
 
@@ -256,6 +292,11 @@ static void emit_stmt(CGen *g, const Stmt *s) {
          *   ADD var_reg, var_reg, R_one  <── var++
          *   BRnzp ALL, S_back, B_back   <── unconditional back; backpatch
          *   PC_end:
+         *
+         * Hardware branch semantics (pc.sv): pc_out <= pc_out + branch_offset,
+         * i.e. target = <address of the BRnzp instruction itself> + offset.
+         * (NOT target = address_of_BRnzp + 1 + offset -- that was the bug.)
+         * So offset = target_pc - brnzp_pc, with no extra +1/-1 fudge.
          */
         case STMT_FOR: {
             int var_reg = syms_lookup(g->syms, s->for_stmt.var);
@@ -290,12 +331,12 @@ static void emit_stmt(CGen *g, const Stmt *s) {
 
             int pc_end = g->buf->count;
 
-            /* backpatch exit branch */
-            int exit_off = pc_end - brnzp_exit - 1;
+            /* backpatch exit branch: target = pc_end (first instr after loop) */
+            int exit_off = pc_end - brnzp_exit;
             patch_brnzp(g->buf, brnzp_exit, NZP_ZP, exit_off, exit_off);
 
-            /* backpatch back-edge (negative offset) */
-            int back_off = pc_top - (brnzp_back + 1);   /* negative */
+            /* backpatch back-edge: target = pc_top (re-eval bound + CMP) */
+            int back_off = pc_top - brnzp_back;   /* negative */
             patch_brnzp(g->buf, brnzp_back, NZP_ALL, back_off, back_off);
             break;
         }
@@ -335,14 +376,18 @@ static void emit_stmt(CGen *g, const Stmt *s) {
             /* Poll DONE:
              *   PC_poll: LDR R_DONE, R0, 0x1F8
              *            CMP R_DONE, R0
-             *            BRnzp Z, -3, -3      (loop if DONE==0)
+             *            BRnzp Z, off, off      (loop back to PC_poll if DONE==0)
+             *
+             * Same PC-relative semantics as STMT_FOR above: target = pc_poll,
+             * offset = pc_poll - brnzp_poll. No +1/-1 fudge -- pc.sv adds the
+             * offset to the branch instruction's own pc_out directly.
              */
             int pc_poll = g->buf->count;
             emit_ldr   (g->buf, R_DONE, R0, 0x1F8);
             emit_cmp   (g->buf, R_DONE, R0);
             int brnzp_poll = g->buf->count;
             emit_brnzp (g->buf, NZP_Z, 0, 0);
-            int off = pc_poll - (brnzp_poll + 1);   /* = -3 */
+            int off = pc_poll - brnzp_poll;
             patch_brnzp(g->buf, brnzp_poll, NZP_Z, off, off);
             break;
         }

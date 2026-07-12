@@ -1,0 +1,3 @@
+kernel void dot4test() {
+    mem[2] = dot4(mem[0], mem[1]);
+}

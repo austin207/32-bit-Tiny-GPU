@@ -1,0 +1,7 @@
+kernel void fmatest() {
+    int a = mem[0];
+    int b = mem[1];
+    int c = mem[2];
+    int r = fma(a, b, c);
+    mem[3] = r;
+}
