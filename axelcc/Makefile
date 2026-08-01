@@ -29,7 +29,7 @@ test: $(TARGET)
 #
 # test_nestedif.axelc is deliberately excluded: it's a negative test for
 # sema.c's nested-if rejection and is *supposed* to fail to compile.
-EXAMPLES = relu test_loopsum test_fmatest test_ifelse test_ltcheck test_matmultest test_dot4test test_chain1 test_chain2 test_chain3 test_divmod test_nestedfor attn_scores test_expif test_ifdiverge attn_softmax attn_weighted_v
+EXAMPLES = relu test_loopsum test_fmatest test_ifelse test_ltcheck test_matmultest test_dot4test test_chain1 test_chain2 test_chain3 test_divmod test_nestedfor attn_scores test_expif test_ifdiverge attn_softmax attn_weighted_v test_params
 
 OUTDIR = test_binaries
 HEXDIR = ../assembler/builds/hex
@@ -42,7 +42,7 @@ examples: $(TARGET)
 	done
 	cp $(OUTDIR)/relu.hex           $(HEXDIR)/axelcc_relu.hex
 	cp $(OUTDIR)/relu.axelbin       $(BINDIR)/axelcc_relu.axelbin
-	@for k in test_loopsum test_fmatest test_ifelse test_ltcheck test_matmultest test_dot4test test_chain1 test_chain2 test_chain3 test_divmod test_nestedfor attn_scores test_expif test_ifdiverge attn_softmax attn_weighted_v; do \
+	@for k in test_loopsum test_fmatest test_ifelse test_ltcheck test_matmultest test_dot4test test_chain1 test_chain2 test_chain3 test_divmod test_nestedfor attn_scores test_expif test_ifdiverge attn_softmax attn_weighted_v test_params; do \
 		cp $(OUTDIR)/$$k.hex     $(HEXDIR)/$$k.hex; \
 		cp $(OUTDIR)/$$k.axelbin $(BINDIR)/$$k.axelbin; \
 	done

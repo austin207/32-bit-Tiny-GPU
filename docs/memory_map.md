@@ -582,6 +582,37 @@ inference.py:
   must follow the same packed response-data convention
 ```
 
+## Kernel parameter ABI
+
+`axelcc` kernels can declare parameters:
+
+```c
+kernel void attn_scores(int q_base, int k_base, int out_base) { ... }
+```
+
+Parameters are passed through a reserved data-memory region, not registers:
+
+| Address range | Name              | Size    | Description                        |
+| ------------: | ----------------- | ------: | ----------------------------------- |
+|   `0x100-0x10F` | `PARAM_BASE[16]` | 16 words | Kernel parameter values, in order |
+
+The host writes one word per declared parameter, in declaration order, to
+`PARAM_BASE + i` before launching the kernel — exactly like any other kernel
+input (there is no separate "argument-passing" mechanism; parameters are
+just memory, same as `mem[]` reads/writes elsewhere in a kernel). At kernel
+entry, the compiled program loads each parameter from `PARAM_BASE + i` into
+the register `sema` assigned that parameter name (declaration order, first
+parameter gets the lowest register), before any of the kernel's own body
+runs.
+
+Example: `kernel void paramtest(int a, int b) { mem[0] = a + b; }` compiled
+with `a` at `PARAM_BASE+0` and `b` at `PARAM_BASE+1` emits two `LDR`
+instructions from `0x100`/`0x101` before the `mem[0] = a + b` body.
+
+This mirrors the MMIO accelerator's existing convention of reserving a fixed
+address range (`0x1F0+`) for a special-purpose channel, just for passing
+kernel arguments instead of driving the matmul accelerator.
+
 ## Known memory limitations
 
 - Data memory is modeled in cocotb, not implemented as final RTL SRAM/BRAM at top level.

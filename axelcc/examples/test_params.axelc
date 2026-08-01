@@ -1,0 +1,6 @@
+// De-risking test for the kernel parameter ABI: parameters a, b are loaded
+// from PARAM_BASE (0x100) / PARAM_BASE+1 (0x101) by codegen() before this
+// body runs, into the registers sema assigned them.
+kernel void paramtest(int a, int b) {
+    mem[0] = a + b;
+}

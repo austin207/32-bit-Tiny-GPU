@@ -9,6 +9,14 @@
 #define R30 30   /* blockIdx                         */
 #define R31 31   /* blockDim                         */
 
+/* Kernel parameter ABI: the host writes one word per declared kernel
+ * parameter, in order, to PARAM_BASE..PARAM_BASE+N-1 before launch (same
+ * memory-is-the-interface convention the MMIO accelerator uses for its
+ * 0x1F0+ control region, just for a different purpose). codegen() loads
+ * them into the registers sema already assigned before the kernel body
+ * runs. */
+#define PARAM_BASE 0x100
+
 /* NZP mask constants matching ISA */
 #define NZP_N   0b100
 #define NZP_Z   0b010
@@ -435,6 +443,13 @@ int codegen(const Program *prog, const SemaResult *sema, InstrBuf *out) {
     g.filename  = prog->filename;
     g.had_error = 0;
     g.next_tmp  = SEMA_TMP_BASE;
+
+    /* Load kernel parameters from PARAM_BASE.. into their assigned
+     * registers before the body runs. */
+    for (int pi = 0; pi < prog->kernels[0].param_count; pi++) {
+        int reg = syms_lookup(g.syms, prog->kernels[0].params[pi].name);
+        emit_ldr(g.buf, reg, R0, PARAM_BASE + pi);
+    }
 
     emit_stmtlist(&g, prog->kernels[0].body);
 
