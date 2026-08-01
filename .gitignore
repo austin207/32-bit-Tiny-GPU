@@ -27,5 +27,4 @@ schematics/json/
 # axelcc generated files
 axelcc/axelcc
 axelcc/build/
-axelcc/*.hex
-axelcc/*.axelbin
+axelcc/test_binaries/

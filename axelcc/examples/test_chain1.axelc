@@ -1,0 +1,3 @@
+kernel void chainstage1() {
+    mem[10] = mem[0] + mem[1];
+}

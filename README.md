@@ -9,14 +9,15 @@ This project includes a custom ISA, AXEL C assembler, `axelcc` C-subset compiler
 ## Status
 
 ```text
-Full regression:        315/315 tests passing
-Top-level GPU suite:    20/20 tests passing
+Full regression:        323/323 tests passing (`make test` from repo root)
+Top-level GPU suite:    28/28 tests passing
 SIMT ReLU test:         PASSING
 DOT4 kernel test:       PASSING
 Q8 MLP workloads:       PASSING
 Q8 matvec/matmul:       PASSING
 Phase 21 accelerator:   PASSING
-axelcc ReLU RTL test:   PASSING
+axelcc RTL tests:       9/9 PASSING (relu, loopsum, fmatest, ifelse x2,
+                         ltcheck x2, matmultest, dot4test)
 Execution trace:        cycle-accurate CSV logger integrated
 Kernel cycle counter:   hardware 32-bit counter on kernel_cycles port
 PyAXEL runtime:         cocotb subprocess backend, smoke test passing
@@ -40,10 +41,15 @@ Core:                14/14 PASS
 Dispatcher:          19/19 PASS
 DCR:                 19/19 PASS
 Warp Stack:          17/17 PASS
-Top-Level GPU:       20/20 PASS
+Top-Level GPU:       28/28 PASS
 
-Total:               315/315 PASS
+Total:               323/323 PASS
 ```
+
+`make test` from the repo root now always rebuilds `axelcc` from source and
+recompiles every example kernel before running any RTL test (see
+`axelcc/README.md`), so this number reflects a fully fresh build every time,
+not stale pre-copied `.hex` artifacts.
 
 Key verified top-level workloads:
 
@@ -64,7 +70,8 @@ Phase 18 Q8 4x4 matmul
 Phase 19 Q8 4x8 matmul
 Phase 20 Q8 4x16 tiled matmul
 Phase 21 MMIO matmul accelerator
-axelcc compiler-generated ReLU
+axelcc compiler: relu, loopsum, fmatest, if/else (both branches),
+  ltcheck (both branches), mmio_matmul, dot4
 ```
 
 ---
@@ -159,7 +166,7 @@ Delta:             +263
 
 The Phase 21 accelerator is currently sequential, so it is slower than the parallel DOT4 GPU kernel for this small matrix size. Its purpose is to verify top-level MMIO accelerator integration, runtime configuration latching, memory read/write behavior, completion tracking, and accelerator-aware `kernel_done` gating.
 
-### axelcc Compiler ReLU
+### axelcc Compiler
 
 ```text
 input  = [5, -3, 8, -1]
@@ -169,6 +176,15 @@ kernel_cycles = 138
 ```
 
 The compiler-generated `.hex` executes correctly on the full `Top_level_GPU` RTL testbench.
+
+Beyond ReLU, `axelcc` now compiles and hardware-verifies `if`/`else` (both
+branches), `for` loops, `dot4()`, `fma()`, and `mmio_matmul()` — 9 RTL
+tests total. Two real compiler bugs were found and fixed during that
+verification work: `STMT_IF` codegen had no instruction to skip the
+`then` body on the not-taken path (so an `else` branch's write was always
+overwritten by the `then` body's write), and `EXPR_DOT4` was silently
+emitting the scalar `FMA` opcode instead of the packed `DOT4` opcode. See
+`axelcc/README.md` for the full writeup.
 
 ---
 
@@ -542,7 +558,8 @@ Main files:
 ```text
 axelcc/Makefile
 axelcc/README.md
-axelcc/examples/relu.axelc
+axelcc/examples/*.axelc     (relu, loopsum, fmatest, ifelse, ltcheck,
+                              matmultest, dot4test, nestedif)
 axelcc/src/
 ```
 
@@ -584,32 +601,30 @@ cd axelcc
 make clean && make
 ```
 
-Compile the example ReLU kernel:
+Compile the example ReLU kernel (or use `make examples` to compile every
+kernel straight into `test_binaries/` and copy into `assembler/builds/`,
+see below):
 
 ```bash
 ./axelcc examples/relu.axelc
 ```
 
-Generated local outputs:
+Generated local outputs (current directory, unless `-o` is passed):
 
 ```text
 relu.hex
 relu.axelbin
 ```
 
-Run compiler-generated ReLU on full GPU RTL:
+Run compiler-generated ReLU on full GPU RTL. `make examples` (in `axelcc/`)
+rebuilds the compiler and recompiles every kernel, copying `.hex`/`.axelbin`
+into `assembler/builds/` automatically -- no manual copy step:
 
 ```bash
 cd ~/gpu-project/axelcc
-make clean && make
-./axelcc examples/relu.axelc
+make examples
 
-cd ~/gpu-project
-mkdir -p assembler/builds/hex assembler/builds/bin
-cp axelcc/relu.hex assembler/builds/hex/axelcc_relu.hex
-cp axelcc/relu.axelbin assembler/builds/bin/axelcc_relu.axelbin
-
-cd Src/Top_level_GPU
+cd ~/gpu-project/Src/Top_level_GPU
 make COCOTB_TEST_MODULES=tests.test_axelcc_relu
 ```
 
@@ -630,15 +645,16 @@ kernel void
 int variables
 assignments
 mem[...] load/store
-if/else
+if/else            (hardware-verified, both branches)
+for (i = init; i < bound; i++)   (< only)
 return
 threadIdx
 blockIdx
 blockDim
-dot4()
-fma()
-exp8()
-mmio_matmul() reserved
+dot4()              -> DOT4 opcode (0x16), hardware-verified
+fma()                -> FMA opcode (0x0C), hardware-verified
+mmio_matmul()        -> full accelerator launch+poll, hardware-verified
+exp8()               reserved, not yet exercised by any test
 ```
 
 Current limitations:
@@ -647,10 +663,11 @@ Current limitations:
 one kernel per source file
 no pointer support
 no local arrays
-no nested if
+no nested if (enforced by sema.c, by design)
 no optimizer
 simple register allocation
 no full kernel parameter ABI in RTL flow yet
+for loops only support a < condition
 ```
 
 Full compiler documentation: [`axelcc/README.md`](axelcc/README.md)
@@ -761,6 +778,13 @@ cd Src/Top_level_GPU
 make COCOTB_TEST_MODULES=tests.test_axelcc_relu
 ```
 
+Run the full axelcc RTL suite:
+
+```bash
+cd Src/Top_level_GPU
+make COCOTB_TEST_MODULES=tests.test_axelcc_relu,tests.test_axelcc_loopsum,tests.test_axelcc_fmatest,tests.test_axelcc_ifelse,tests.test_axelcc_ltcheck,tests.test_axelcc_matmultest,tests.test_axelcc_dot4test
+```
+
 Run matmul accelerator standalone tests:
 
 ```bash
@@ -793,8 +817,8 @@ make infer
 | Dispatcher        |      19 | PASS             |
 | DCR               |      19 | PASS             |
 | Warp Stack        |      17 | PASS             |
-| Top-Level GPU     |      20 | PASS             |
-| **Total**         | **315** | **315/315 PASS** |
+| Top-Level GPU     |      28 | PASS             |
+| **Total**         | **323** | **323/323 PASS** |
 
 Top-level GPU suite includes:
 
@@ -804,7 +828,7 @@ test_simt_relu
 test_dot4_kernel
 test_pyaxel_runner
 test_phase08_mlp
-test_phase09_ldr
+test_phase09_ldr (2 tests: single + broadcast)
 test_phase10_mlp_8out
 test_phase11_mlp_8in
 test_phase12_mlp_q6
@@ -818,6 +842,12 @@ test_phase19_q8_matmul_4x8
 test_phase20_q8_matmul_4x16
 test_phase21_accel_matmul
 test_axelcc_relu
+test_axelcc_loopsum
+test_axelcc_fmatest
+test_axelcc_ifelse (2 tests: then + else branch)
+test_axelcc_ltcheck (2 tests: true + false)
+test_axelcc_matmultest
+test_axelcc_dot4test
 ```
 
 ---
@@ -910,7 +940,7 @@ Full GDS documentation: [`gds/README.md`](gds/README.md)
 9. Accelerator MMIO writes must not be treated as normal data-memory writes.
 10. Accelerator runtime configuration must be latched on `START`, not read live while running.
 11. Top-level `kernel_done` must wait for both dispatcher completion and accelerator completion.
-12. Generated files such as `assembler/builds/`, `sim_build/`, `results.xml`, `axelcc/build/`, `axelcc/*.hex`, and `axelcc/*.axelbin` should not be committed.
+12. Generated files such as `assembler/builds/`, `sim_build/`, `results.xml`, `axelcc/build/`, and `axelcc/test_binaries/` should not be committed.
 
 Detailed debug history: [`docs/debug_log.md`](docs/debug_log.md)
 
@@ -935,6 +965,12 @@ Clean high-level repository structure:
 │   │   │   ├── common.py
 │   │   │   ├── memory_models.py
 │   │   │   ├── test_axelcc_relu.py
+│   │   │   ├── test_axelcc_loopsum.py
+│   │   │   ├── test_axelcc_fmatest.py
+│   │   │   ├── test_axelcc_ifelse.py
+│   │   │   ├── test_axelcc_ltcheck.py
+│   │   │   ├── test_axelcc_matmultest.py
+│   │   │   ├── test_axelcc_dot4test.py
 │   │   │   ├── test_phase08_mlp.py
 │   │   │   ├── test_phase09_ldr.py
 │   │   │   ├── test_phase10_mlp_8out.py
@@ -1178,9 +1214,15 @@ Clean high-level repository structure:
 │   │   ├── sema.o
 │   │   └── writer.o
 │   ├── examples
-│   │   └── relu.axelc
-│   ├── relu.axelbin
-│   ├── relu.hex
+│   │   ├── relu.axelc
+│   │   ├── test_loopsum.axelc
+│   │   ├── test_fmatest.axelc
+│   │   ├── test_ifelse.axelc
+│   │   ├── test_ltcheck.axelc
+│   │   ├── test_matmultest.axelc
+│   │   ├── test_dot4test.axelc
+│   │   └── test_nestedif.axelc      (negative test, deliberately rejected)
+│   ├── test_binaries          (generated .hex/.axelbin output, gitignored)
 │   └── src
 │       ├── ast.c
 │       ├── ast.h
@@ -1363,8 +1405,7 @@ Common generated paths:
 assembler/builds/
 axelcc/build/
 axelcc/axelcc
-axelcc/*.hex
-axelcc/*.axelbin
+axelcc/test_binaries/
 sim_build/
 __pycache__/
 results.xml
@@ -1413,14 +1454,20 @@ make
 * No dedicated RTL SRAM macro is integrated yet.
 * Memory is word-addressed only.
 * Byte-addressable memory access is not implemented.
-* Branch offsets are currently simple and mostly forward-oriented in the assembler/compiler flow.
+* `branch_offset` is a 12-bit two's-complement signed field, sign-extended
+  in `pc.sv` before being added to `pc_out`, so both forward and backward
+  branches are supported. The AXEL assembler/`axelcc` encoders don't
+  themselves validate sign or range -- they just mask the low bits -- so
+  callers must pass an already-masked value for negative offsets.
 * `CONST` loads a 16-bit zero-extended immediate only.
-* No sign-extending immediate instruction exists yet.
+* No sign-extending immediate instruction exists yet (this is about
+  `LDR`/`STR`/`CONST` immediates, unrelated to the signed `branch_offset` above).
 * `DIV` and `MOD` are replaced with `32'b0` in the synthesis target.
 * `kernel_done` behavior must be handled carefully around repeated launches.
 * The Phase 21 accelerator is sequential and currently not optimized for throughput.
 * `axelcc` has no full kernel parameter ABI in the RTL test flow yet.
 * `axelcc` has no optimizer and uses simple register allocation.
+* `axelcc` `for` loops only support a `<` condition.
 * Critical path is a wide mux tree through complex cells, limiting TT frequency to approximately 32.9 MHz.
 * Floorplan and placement optimization are still future work.
 
@@ -1442,6 +1489,15 @@ Phase 20 tiled Q8 matmul
 Phase 21 MMIO matmul accelerator
 axelcc compiler frontend/backend
 axelcc ReLU verified on full GPU RTL
+axelcc if/else (both branches), for loops, dot4(), fma(), mmio_matmul()
+  verified on full GPU RTL
+Fixed pc.sv branch_offset sign-extension bug (backward branches)
+Fixed axelcc STMT_IF else-branch fallthrough codegen bug
+Fixed axelcc EXPR_DOT4 wrong-opcode codegen bug
+axelcc wired into root `make test` (always rebuilds from source)
+Sequential-kernel-launch infra in the cocotb harness (launch_kernel() helper,
+  proven with a 3-stage axelcc kernel chain sharing memory across full-reset
+  relaunches)
 Tang Nano 20K FPGA target files
 Sky130A OpenLane GDS flow
 Post-route STA
@@ -1450,14 +1506,11 @@ Post-route STA
 Next:
 
 ```text
-Add axelcc DOT4 examples
-Add axelcc-generated Q8 matvec
-Add axelcc-generated Q8 matmul
-Integrate axelcc MMIO matmul builtin
+Add axelcc-generated Q8 matvec/matmul beyond the MMIO accelerator path
 Define kernel parameter ABI
-Begin transformer-style kernels
+Begin transformer-style kernels (attention: QK^T, softmax, xV)
 Improve compiler register allocation
-Add compiler golden-output tests
+Add compiler golden-output tests (.hex/.axelbin content, not just RTL execution)
 Add constant folding
 Add dead-code elimination
 Add local array support
@@ -1466,6 +1519,7 @@ Explore pipelined / tiled accelerator design
 Tighten OpenLane floorplan
 Improve critical path timing
 Flash and verify FPGA build on Tang Nano 20K
+Re-run OpenLane GDS flow with current RTL/codegen fixes
 ```
 
 ---

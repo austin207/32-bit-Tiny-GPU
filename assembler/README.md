@@ -523,8 +523,15 @@ Important limitation:
 ```text
 sync_offset is masked to 11 bits.
 branch_offset is masked to 12 bits.
-Both are currently treated as unsigned forward offsets.
 ```
+
+`branch_offset` is a two's-complement signed field: `pc.sv` sign-extends it
+before adding to `pc_out`, so both forward and backward branches (loop
+back-edges, poll loops) are supported. The encoder here (`encode_b`) does
+not itself validate sign or range -- it just masks the low N bits -- so
+callers are responsible for passing a value that's already in range for a
+signed 12-bit (`branch_offset`) or 11-bit (`sync_offset`) field, e.g. via
+`(uint32_t)(-2) & 0xFFF` for a negative offset.
 
 ---
 
@@ -1034,7 +1041,10 @@ axel_sync(&gpu);
 - gpu_program_write silently returns if fopen fails.
 - CONST only supports a 16-bit zero-extended immediate.
 - Branch offsets are masked, not range-checked.
-- Branch offsets are currently forward unsigned offsets.
+- Branch offsets are two's-complement signed (hardware sign-extends
+  `branch_offset` in `pc.sv`), so backward branches work, but the encoder
+  itself doesn't validate sign or range -- pass an already-masked negative
+  value (e.g. `(uint32_t)(-2) & 0xFFF`) for backward branches.
 - No label system yet.
 - No automatic branch-offset calculation.
 - No parser for assembly text yet.

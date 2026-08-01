@@ -189,11 +189,16 @@ if (nzp_en)
 
 if (pc_en) begin
     if (branch_en && (nzp_reg & nzp_mask) != 0)
-        pc_out <= pc_out + branch_offset;
+        pc_out <= pc_out + {{20{branch_offset[11]}}, branch_offset};
     else
         pc_out <= pc_out + 1;
 end
 ```
+
+`branch_offset` is a 12-bit two's-complement signed field. It is sign-extended
+to 32 bits before being added to `pc_out`, so both forward and backward
+branches are supported (loop back-edges, MMIO poll loops, etc. all rely on
+negative offsets).
 
 ## Normal increment
 
@@ -224,8 +229,10 @@ branch_en && (nzp_reg & nzp_mask) != 0
 If taken:
 
 ```systemverilog
-pc_out <= pc_out + branch_offset;
+pc_out <= pc_out + {{20{branch_offset[11]}}, branch_offset};
 ```
+
+`branch_offset` is sign-extended before the add, so `target_pc = branch_instruction_pc + signed(branch_offset)`, with no additional `+1`/`-1` adjustment.
 
 If not taken:
 
@@ -321,7 +328,7 @@ always_ff @(posedge clk or posedge rst) begin
 
         if (pc_en) begin
             if (branch_en && (nzp_reg & nzp_mask) != 0)
-                pc_out <= pc_out + branch_offset;
+                pc_out <= pc_out + {{20{branch_offset[11]}}, branch_offset};
             else
                 pc_out <= pc_out + 1;
         end
@@ -601,9 +608,14 @@ Do not remove `block_rst`.
 
 Without `block_rst`, a core reused for a later block could continue fetching from the previous block’s final PC.
 
-Do not assume `branch_offset` is signed.
+`branch_offset` is signed.
 
-The current PC adds the 12-bit `branch_offset` directly to `pc_out`. Negative branches are not represented by this logic unless the ISA/PC implementation is later extended.
+The PC sign-extends the 12-bit `branch_offset` field before adding it to
+`pc_out`, so encoded values with the top bit set (`>= 0x800`) are negative
+offsets. This was previously a bug (the field was added unsigned/zero-extended,
+which silently broke every backward branch), fixed by sign-extending it.
+Any code generator or hand-assembled program that emits `branch_offset` must
+treat it as a two's-complement value, not a plain unsigned magnitude.
 
 Do not assume `nzp_out` changes combinationally from `nzp_flag`.
 

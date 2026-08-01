@@ -518,12 +518,22 @@ Unit/integration test file:
 Src/Top_level_GPU/test_top_level_gpu.py
 ```
 
-Current tests:
+Plus one file per phase/feature under `Src/Top_level_GPU/tests/`. Full
+current list (28 tests, all passing) is the `COCOTB_TEST_MODULES` value in
+the Makefile below -- summarized:
 
 ```text
-test_gpu_axel_program
-test_simt_relu
+test_top_level_gpu.py       test_gpu_axel_program, test_simt_relu,
+                             test_dot4_kernel, test_pyaxel_runner
+tests/test_phase08..21_*    MLP/digit-classifier/Q8-matmul/accelerator
+                             regression, one file per phase (14 tests)
+tests/test_axelcc_*         axelcc-compiled kernels: relu, loopsum,
+                             fmatest, ifelse (both branches), ltcheck
+                             (both branches), matmultest, dot4test (9 tests)
 ```
+
+See `axelcc/README.md` for what each `test_axelcc_*` test verifies about
+the compiler.
 
 ## `test_gpu_axel_program`
 
@@ -679,6 +689,7 @@ Top-level cocotb Makefile:
 TOPLEVEL_LANG = verilog
 VERILOG_SOURCES = $(shell pwd)/top_level_gpu.sv \
                   $(shell pwd)/../warp_stack/warp_stack.sv \
+                  $(shell pwd)/../matmul_accelerator/matmul_accelerator.sv \
                   $(shell pwd)/../memory_controller/mem_controller.sv \
                   $(shell pwd)/../device_control_register/dcr.sv \
                   $(shell pwd)/../dispatcher/dispatcher.sv \
@@ -692,15 +703,21 @@ VERILOG_SOURCES = $(shell pwd)/top_level_gpu.sv \
                   $(shell pwd)/../registers/register_file.sv
 
 TOPLEVEL = gpu
-COCOTB_TEST_MODULES = test_top_level_gpu
 SIM = icarus
 export PYTHONPATH := $(shell pwd):$(PYTHONPATH)
+
+COCOTB_TEST_MODULES ?= test_top_level_gpu,tests.test_phase08_mlp,tests.test_phase09_ldr,tests.test_phase10_mlp_8out,tests.test_phase11_mlp_8in,tests.test_phase12_mlp_q6,tests.test_phase13_digit_hidden,tests.test_phase14_digit_output,tests.test_phase15_digit64_hidden,tests.test_phase16_digit64_classifier,tests.test_phase17_q8_matvec,tests.test_phase18_q8_matmul,tests.test_phase19_q8_matmul_4x8,tests.test_phase20_q8_matmul_4x16,tests.test_phase21_accel_matmul,tests.test_axelcc_relu,tests.test_axelcc_loopsum,tests.test_axelcc_fmatest,tests.test_axelcc_ifelse,tests.test_axelcc_ltcheck,tests.test_axelcc_matmultest,tests.test_axelcc_dot4test
+
 include $(shell cocotb-config --makefiles)/Makefile.sim
 
 infer:
 	rm -f results.xml
 	$(MAKE) results.xml COCOTB_TEST_MODULES=inference
 ```
+
+`matmul_accelerator.sv` is included because `top_level_gpu.sv` instantiates
+it directly (the MMIO matmul accelerator, memory-mapped at data_mem
+addr `>= 0x1F0`) -- it's not optional even for tests that don't use it.
 
 ## Running tests
 
@@ -884,7 +901,11 @@ If `LDR` data is wrong, CMP/BR behavior becomes misleading.
 | ----------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `test_gpu_axel_program` | `test_top_level_gpu.py`                        | Full top-level AXEL program flow, forward/update kernels, memory model, DCR dispatch |
 | `test_simt_relu`        | `test_top_level_gpu.py`                        | LDR, CMP, divergence, SYNC, STR, packed response-data path                           |
-| `test_gpu_inference`    | `inference.py`                                 | Forward-only inference using saved weights                                           |
+| `test_dot4_kernel`      | `test_top_level_gpu.py`                        | Hand-assembled packed INT8x4 `DOT4` kernel                                           |
+| `test_pyaxel_runner`    | `test_top_level_gpu.py`                        | PyAXEL assembler-to-hex pipeline sanity check                                        |
+| `test_phase08..21_*`    | `tests/test_phase08_mlp.py` .. `tests/test_phase21_accel_matmul.py` | MLP inference, quantization, digit classifiers, Q8 matvec/matmul tiling, hand-assembled MMIO matmul accelerator (14 tests) |
+| `test_axelcc_*`         | `tests/test_axelcc_*.py`                       | `axelcc`-compiled kernels: relu, loopsum, fmatest, ifelse, ltcheck, matmultest, dot4test (9 tests, see `axelcc/README.md`) |
+| `test_gpu_inference`    | `inference.py`                                 | Forward-only inference using saved weights (run via `make infer`, not part of the default `COCOTB_TEST_MODULES` list) |
 | `test_dispatcher_*`     | `Src/dispatcher/test_dispatcher.py`            | Block assignment and `kernel_done` behavior                                          |
 | `test_core_basic`       | `Src/core/test_core.py`                        | Core can fetch/execute/RET                                                           |
 | `test_mem_controller_*` | `Src/memory_controller/test_mem_controller.py` | Per-thread memory response routing                                                   |
@@ -907,14 +928,25 @@ If `LDR` data is wrong, CMP/BR behavior becomes misleading.
 ## Last known status
 
 ```text
-Status: passing
+Status: passing (28/28 tests in this module; 323/323 project-wide)
 
 Verified with:
   cd ~/gpu-project
   make test
 
-Important fixed bug:
+Important fixed bugs (this module's own history):
   Packed response-data path aligned for data_mem_resp_data / mem_controller / LSU readback.
+
+Important fixed bugs (surfaced through this module's tests, root cause elsewhere):
+  pc.sv branch_offset was zero-extended instead of sign-extended, breaking
+    every backward branch (loop back-edges, MMIO poll loops).
+  axelcc STMT_IF codegen had no instruction to skip the then-body on the
+    not-taken path, so else-branch/false-branch conditions always executed
+    the then-body's write last, regardless of the actual condition.
+  axelcc EXPR_DOT4 silently emitted the FMA opcode instead of DOT4.
+  test_axelcc_matmultest hung for 100k cycles due to a stale axelcc binary
+    being used to recompile the test kernel after a source fix -- not an
+    RTL or codegen-logic bug at all.
 
 Key regression:
   test_simt_relu passes with:

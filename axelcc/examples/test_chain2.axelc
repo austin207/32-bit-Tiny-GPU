@@ -1,0 +1,3 @@
+kernel void chainstage2() {
+    mem[11] = mem[10] * 2;
+}

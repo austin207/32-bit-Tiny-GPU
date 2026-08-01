@@ -112,6 +112,74 @@ async def run_kernel(dut, kernel, *, timeout_cycles=TIMEOUT_CYCLES):
     return None, timeout_cycles
 
 
+async def launch_kernel(
+    dut,
+    instructions_ref,
+    instructions,
+    *,
+    num_blocks=1,
+    blockDim=1,
+    timeout_cycles=TIMEOUT_CYCLES,
+    reset=True,
+):
+    """
+    Load `instructions` (an {addr: word} dict, same shape axelcc's raw
+    .hex-based tests already build) as the next program and run it to
+    completion. Call once per kernel in a sequential-launch chain.
+
+    `instructions_ref` (the mutable [dict] cell passed to
+    program_memory_model) and any data_memory_model coroutines must
+    already be running -- this only drives the DCR/reset/poll sequence.
+    The data_memory dict is owned by the caller and is *not* touched here,
+    so it persists across launches: that's how kernels in this project
+    communicate with each other (through mem[], not through registers),
+    matching test_phase16_digit64_classifier's proven phase15->phase16
+    chain (see run_kernel above, which this generalizes to not require an
+    .axelbin-loaded `kernel` dict).
+
+    reset=True (default) does a full DUT reset before launching, so every
+    kernel gets a clean register file, warp-stack, and dispatcher state.
+    reset=False skips it and just re-triggers DCR/dispatch, relying on the
+    dispatcher's own running/kernel_done bookkeeping (it resets cleanly on
+    the next dispatch_en pulse) -- only safe if you've confirmed the prior
+    kernel left the warp stack empty. warp_stack.sv's `sp` is cleared only
+    by `rst`, not by block_rst/core_start, so a kernel that somehow RETs
+    mid-divergence (shouldn't happen in a well-formed kernel, but not
+    hardware-enforced) would leave stale entries for the next kernel under
+    reset=False. Default to reset=True unless you have a specific reason
+    (e.g. timing/cycle-count measurement across a chain) not to.
+
+    Returns the cycle count the kernel took, or None on timeout.
+    """
+    instructions_ref[0] = instructions
+
+    if reset:
+        await reset_gpu(dut)
+
+    dut.dcr_write_en.value = 1
+
+    dut.dcr_addr.value = 0b00
+    dut.dcr_data.value = num_blocks
+    await RisingEdge(dut.clk)
+
+    dut.dcr_addr.value = 0b01
+    dut.dcr_data.value = blockDim
+    await RisingEdge(dut.clk)
+
+    dut.dcr_addr.value = 0b10
+    dut.dcr_data.value = 0
+    await RisingEdge(dut.clk)
+
+    dut.dcr_write_en.value = 0
+
+    for cycle in range(timeout_cycles):
+        await RisingEdge(dut.clk)
+        if dut.kernel_done.value == 1:
+            return cycle + 1
+
+    return None
+
+
 async def print_core_debug(dut):
     print("\n── Core debug snapshot ──")
 

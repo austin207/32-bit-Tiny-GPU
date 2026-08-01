@@ -16,7 +16,7 @@ build:
 	mkdir -p build
 
 clean:
-	rm -rf build $(TARGET)
+	rm -rf build $(TARGET) test_binaries
 
 test: $(TARGET)
 	./$(TARGET) --tokens examples/relu.axelc
@@ -29,21 +29,22 @@ test: $(TARGET)
 #
 # test_nestedif.axelc is deliberately excluded: it's a negative test for
 # sema.c's nested-if rejection and is *supposed* to fail to compile.
-EXAMPLES = relu test_loopsum test_fmatest test_ifelse test_ltcheck test_matmultest test_dot4test
+EXAMPLES = relu test_loopsum test_fmatest test_ifelse test_ltcheck test_matmultest test_dot4test test_chain1 test_chain2 test_chain3
 
+OUTDIR = test_binaries
 HEXDIR = ../assembler/builds/hex
 BINDIR = ../assembler/builds/bin
 
 examples: $(TARGET)
-	@mkdir -p $(HEXDIR) $(BINDIR)
+	@mkdir -p $(OUTDIR) $(HEXDIR) $(BINDIR)
 	@for k in $(EXAMPLES); do \
-		./$(TARGET) examples/$$k.axelc || exit 1; \
+		./$(TARGET) examples/$$k.axelc -o $(OUTDIR)/$$k || exit 1; \
 	done
-	cp relu.hex           $(HEXDIR)/axelcc_relu.hex
-	cp relu.axelbin       $(BINDIR)/axelcc_relu.axelbin
-	@for k in test_loopsum test_fmatest test_ifelse test_ltcheck test_matmultest test_dot4test; do \
-		cp $$k.hex     $(HEXDIR)/$$k.hex; \
-		cp $$k.axelbin $(BINDIR)/$$k.axelbin; \
+	cp $(OUTDIR)/relu.hex           $(HEXDIR)/axelcc_relu.hex
+	cp $(OUTDIR)/relu.axelbin       $(BINDIR)/axelcc_relu.axelbin
+	@for k in test_loopsum test_fmatest test_ifelse test_ltcheck test_matmultest test_dot4test test_chain1 test_chain2 test_chain3; do \
+		cp $(OUTDIR)/$$k.hex     $(HEXDIR)/$$k.hex; \
+		cp $(OUTDIR)/$$k.axelbin $(BINDIR)/$$k.axelbin; \
 	done
 
 .PHONY: all clean test examples
