@@ -16,6 +16,8 @@ void ibuf_init(InstrBuf *buf);
 void emit_add  (InstrBuf *b, int rd, int rs1, int rs2);
 void emit_sub  (InstrBuf *b, int rd, int rs1, int rs2);
 void emit_imul (InstrBuf *b, int rd, int rs1, int rs2);
+void emit_div  (InstrBuf *b, int rd, int rs1, int rs2);
+void emit_mod  (InstrBuf *b, int rd, int rs1, int rs2);
 void emit_sar  (InstrBuf *b, int rd, int rs1, int rs2);
 void emit_shl  (InstrBuf *b, int rd, int rs1, int rs2);
 void emit_shr  (InstrBuf *b, int rd, int rs1, int rs2);

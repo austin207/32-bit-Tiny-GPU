@@ -1,0 +1,22 @@
+// Phase 5.1 stage 3: out = weights * V  (Q8 fixed-point, seq_len=4, d_model=4)
+//
+// Thread i owns query row i. out[i][k] is the Q16 dot product of the
+// softmax weight row i with column k of V, rescaled to Q8 with one SAR
+// after the full accumulation -- same convention as attn_scores.
+//
+// Memory layout:
+//   32-47  V[4][4]        (input, row-major, V[j][k] at 32 + j*4+k)
+//   64-79  weights[4][4]  (input, row-major, i*4+j)
+//   80-95  out[4][4]      (output, row-major, i*4+k)
+kernel void attn_weighted_v() {
+    int i = threadIdx;
+    for (int k = 0; k < 4; k++) {
+        int sum = 0;
+        for (int j = 0; j < 4; j++) {
+            int w = mem[64 + i * 4 + j];
+            int v = mem[32 + j * 4 + k];
+            sum = sum + w * v;
+        }
+        mem[80 + i * 4 + k] = sum >> 8;
+    }
+}

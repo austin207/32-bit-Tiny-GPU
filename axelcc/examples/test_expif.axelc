@@ -1,0 +1,19 @@
+// Verifies two combos never exercised before: an if-statement nested inside
+// a for-loop body, and the exp8() builtin actually reaching hardware end to
+// end (EXPR_EXP8 codegen existed but no example/test ever used it). Needed
+// before the Phase 5 softmax kernel, which does both: for(j){ if(d<bound)
+// clamp; exp8(d); }.
+//
+// d sequence: j=0 -> 0, j=1 -> -32, j=2 -> -64, j=3 -> -96, then forced to
+// -128 by the if. Expected exp8 LUT outputs (from alu.sv): 127, 77, 47, 17.
+kernel void expiftest() {
+    int total = 0;
+    for (int j = 0; j < 4; j++) {
+        int d = 0 - j * 32;
+        if (j == 3) { d = -128; }
+        int e = exp8(d);
+        mem[j] = e;
+        total = total + e;
+    }
+    mem[4] = total;
+}

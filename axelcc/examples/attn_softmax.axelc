@@ -1,0 +1,52 @@
+// Phase 5.1 stage 2: weights = softmax(scores), row-wise (Q8 fixed-point).
+//
+// Hardware EXP8 (alu.sv op 0x1B) takes a SIGNED INT8 argument x representing
+// a real value in Q6 (x/64.0), range [-2.0, 1.984]. Any x >= 0 saturates to
+// 127 (its cap for exp(x/64) with x>=0 is always >=1.0, clamped). This is a
+// deliberately coarse hardware LUT, not a general exp() -- so this softmax
+// only has real dynamic range for score gaps up to 2.0 below the row max;
+// larger gaps all bottom out at exp8's floor of 17. That's the actual
+// hardware being modeled, not a bug.
+//
+// Per row i: subtract the row max (score[i][argmax] - score[i][j] >= 0, so
+// exp8's argument is always <= 0, matching the LUT's dynamic range and
+// avoiding the saturate-at-127-for-any-x>=0 case for every non-max entry).
+// Rescale the Q8 diff to Q6 with one SAR by 2 (Q8 = real*256, Q6 = real*64,
+// ratio 4 = 2^2), then clamp to EXP8's INT8 domain floor of -128 before
+// calling exp8 -- required because a diff more negative than -128 in Q6
+// would silently wrap around as a 2's-complement INT8 instead of clamping,
+// which would produce a wrong (possibly positive-looking) LUT lookup.
+//
+// exp8() returns a small unsigned magnitude (0-127, ~Q7 real range
+// [0,1.0]). Normalize each by the row's exp8 sum, scaled to Q8 output via
+// DIV (weight_q8 = e*256/sum). The two-pass structure uses weights[i][j] as
+// scratch: pass 1 stores raw exp8(d) there, pass 2 overwrites it in place
+// with the normalized Q8 value once the row sum is known.
+//
+// Memory layout:
+//   48-63  scores[4][4]  (input, Q8, row-major, i*4+j)
+//   64-79  weights[4][4] (output, Q8, row-major, i*4+j)
+kernel void attn_softmax() {
+    int i = threadIdx;
+    int base = 48 + i * 4;
+    int obase = 64 + i * 4;
+
+    int m = mem[base + 0];
+    if (mem[base + 1] > m) { m = mem[base + 1]; }
+    if (mem[base + 2] > m) { m = mem[base + 2]; }
+    if (mem[base + 3] > m) { m = mem[base + 3]; }
+
+    int sum = 0;
+    for (int j = 0; j < 4; j++) {
+        int d = (mem[base + j] - m) >> 2;
+        if (d < -128) { d = -128; }
+        int e = exp8(d);
+        mem[obase + j] = e;
+        sum = sum + e;
+    }
+
+    for (int k = 0; k < 4; k++) {
+        int e2 = mem[obase + k];
+        mem[obase + k] = e2 * 256 / sum;
+    }
+}

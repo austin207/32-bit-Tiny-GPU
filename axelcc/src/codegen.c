@@ -104,6 +104,8 @@ static int eval_expr(CGen *g, const Expr *e) {
                 case TOK_PLUS:    emit_add (g->buf, dst, lreg, rreg); break;
                 case TOK_MINUS:   emit_sub (g->buf, dst, lreg, rreg); break;
                 case TOK_STAR:    emit_imul(g->buf, dst, lreg, rreg); break;
+                case TOK_SLASH:   emit_div (g->buf, dst, lreg, rreg); break;
+                case TOK_PERCENT: emit_mod (g->buf, dst, lreg, rreg); break;
                 case TOK_SHR:     emit_sar (g->buf, dst, lreg, rreg); break;
                 case TOK_SHL:     emit_shl (g->buf, dst, lreg, rreg); break;
                 case TOK_AMP:     emit_and (g->buf, dst, lreg, rreg); break;
@@ -260,7 +262,23 @@ static void emit_stmt(CGen *g, const Stmt *s) {
             int skip_idx = g->buf->count;
             emit_brnzp(g->buf, NZP_ALL, 0, 0);   /* placeholder */
 
-            emit_sync(g->buf);   /* first SYNC */
+            /* NOP, not SYNC: this is only a branch-target landing pad for
+             * the taken group, who stay active straight through the then
+             * body. A real SYNC here would pop the warp stack before the
+             * then body has run -- there's exactly one push per divergence
+             * (warp_stack.sv), so the taken group must reach the *second*
+             * SYNC (true reconvergence) before any pop happens. Two SYNCs
+             * per if (one per landing pad) pops twice against one push;
+             * the second pop hits an empty stack and defaults active_mask
+             * to all-threads before the then body executes, and the
+             * per-thread PCs (now genuinely different addresses) get
+             * silently hijacked onto whichever thread core.sv's active_pc
+             * mux happens to pick. Found via test_ifdiverge: with real
+             * cross-thread divergence (never exercised before -- every
+             * prior if/ifelse test used blockDim=1 or uniform conditions),
+             * the then body's writes were dropped for every thread but the
+             * one the mux happened to select. */
+            emit_nop(g->buf);
 
             /* then (taken) body */
             int then_start = g->buf->count;

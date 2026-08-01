@@ -1501,6 +1501,18 @@ Sequential-kernel-launch infra in the cocotb harness (launch_kernel() helper,
 Tang Nano 20K FPGA target files
 Sky130A OpenLane GDS flow
 Post-route STA
+axelcc DIV/MOD codegen (opcodes existed in hardware, never wired into the
+  compiler)
+axelcc nested for-loops and if-inside-for verified on full GPU RTL
+Fixed axelcc STMT_IF real cross-thread divergence bug: the taken group's
+  landing pad emitted a real SYNC (pop) instead of a NOP, popping the warp
+  stack twice per one push and hijacking every thread's PC once active_mask
+  incorrectly went full-mask before the then-body executed. Every prior
+  if/ifelse test used blockDim=1 or a uniform condition, so this had never
+  been exercised until now.
+Phase 5.1: 4x4 single-head self-attention (QK^T -> softmax -> weights.V),
+  three chained axelcc kernels sharing memory, Q8 fixed-point, using the
+  real hardware EXP8 LUT (Q6 domain) -- verified end to end on full GPU RTL
 ```
 
 Next:
@@ -1508,7 +1520,7 @@ Next:
 ```text
 Add axelcc-generated Q8 matvec/matmul beyond the MMIO accelerator path
 Define kernel parameter ABI
-Begin transformer-style kernels (attention: QK^T, softmax, xV)
+Multi-head / larger seq_len attention
 Improve compiler register allocation
 Add compiler golden-output tests (.hex/.axelbin content, not just RTL execution)
 Add constant folding

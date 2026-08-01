@@ -43,6 +43,8 @@ static uint32_t n_type(int op) {
 void emit_add  (InstrBuf *b, int rd, int rs1, int rs2) { push(b, r_type(0x01,rd,rs1,rs2)); }
 void emit_sub  (InstrBuf *b, int rd, int rs1, int rs2) { push(b, r_type(0x02,rd,rs1,rs2)); }
 void emit_imul (InstrBuf *b, int rd, int rs1, int rs2) { push(b, r_type(0x13,rd,rs1,rs2)); }
+void emit_div  (InstrBuf *b, int rd, int rs1, int rs2) { push(b, r_type(0x04,rd,rs1,rs2)); }
+void emit_mod  (InstrBuf *b, int rd, int rs1, int rs2) { push(b, r_type(0x05,rd,rs1,rs2)); }
 void emit_sar  (InstrBuf *b, int rd, int rs1, int rs2) { push(b, r_type(0x14,rd,rs1,rs2)); }
 void emit_shl  (InstrBuf *b, int rd, int rs1, int rs2) { push(b, r_type(0x06,rd,rs1,rs2)); }
 void emit_shr  (InstrBuf *b, int rd, int rs1, int rs2) { push(b, r_type(0x07,rd,rs1,rs2)); }

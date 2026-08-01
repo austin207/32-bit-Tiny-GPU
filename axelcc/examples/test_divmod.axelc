@@ -1,0 +1,4 @@
+kernel void divmodtest() {
+    mem[2] = mem[0] / mem[1];
+    mem[3] = mem[0] % mem[1];
+}

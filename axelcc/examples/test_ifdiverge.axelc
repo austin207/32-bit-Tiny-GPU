@@ -1,0 +1,24 @@
+// Regression test for a real hardware/codegen bug found and fixed this
+// session: STMT_IF's codegen (codegen.c) used to emit a real SYNC opcode at
+// the taken group's landing pad, but warp_stack.sv only pushes once per
+// divergence -- two SYNCs (two pops) against one push caused the scheduler
+// to prematurely restore active_mask to all-threads before the taken
+// group's then-body had executed, silently hijacking every thread's
+// instruction stream onto whichever thread core.sv's active_pc mux picked.
+// The fix: the landing pad is now a NOP (no sync_en, no pop), so only the
+// final, true reconvergence point pops the warp stack.
+//
+// Every if/ifelse test before this one used blockDim=1 or a uniform
+// condition, so real per-thread divergence (some threads taken, some not,
+// on the SAME if) had never actually been exercised on hardware. This test
+// chains three sequential ifs with a genuinely different taken/not-taken
+// split each time -- exactly the pattern the Phase 5 softmax kernel's
+// rowmax step needs.
+kernel void ifdivergetest() {
+    int i = threadIdx;
+    int m = mem[i * 4 + 0];
+    if (mem[i * 4 + 1] > m) { m = mem[i * 4 + 1]; }
+    if (mem[i * 4 + 2] > m) { m = mem[i * 4 + 2]; }
+    if (mem[i * 4 + 3] > m) { m = mem[i * 4 + 3]; }
+    mem[16 + i] = m;
+}
