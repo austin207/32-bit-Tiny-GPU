@@ -1,4 +1,5 @@
-(* syn_dont_touch = 1 *) module registers (
+// (* syn_dont_touch = 1 *) module registers (
+module registers (
     input logic clk,
     input logic rst,
     input logic [4:0] r_addr1,

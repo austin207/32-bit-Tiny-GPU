@@ -1,4 +1,5 @@
-(* syn_dont_touch = 1 *) module pc (
+// (* syn_dont_touch = 1 *) module pc (
+module pc (
     input logic clk,
     input logic rst,
     input logic block_rst,    // resets PC to 0 at start of each new block
