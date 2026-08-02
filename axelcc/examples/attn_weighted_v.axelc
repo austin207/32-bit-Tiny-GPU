@@ -4,19 +4,20 @@
 // softmax weight row i with column k of V, rescaled to Q8 with one SAR
 // after the full accumulation -- same convention as attn_scores.
 //
-// Memory layout:
-//   32-47  V[4][4]        (input, row-major, V[j][k] at 32 + j*4+k)
-//   64-79  weights[4][4]  (input, row-major, i*4+j)
-//   80-95  out[4][4]      (output, row-major, i*4+k)
-kernel void attn_weighted_v() {
+// Memory layout (base addresses supplied by the caller via the kernel
+// parameter ABI, so one compiled binary is reusable across heads):
+//   v_base+0..15       V[4][4]        (input, row-major, V[j][k] at v_base + j*4+k)
+//   weights_base+0..15 weights[4][4]  (input, row-major, weights_base + i*4+j)
+//   out_base+0..15     out[4][4]      (output, row-major, out_base + i*4+k)
+kernel void attn_weighted_v(int v_base, int weights_base, int out_base) {
     int i = threadIdx;
     for (int k = 0; k < 4; k++) {
         int sum = 0;
         for (int j = 0; j < 4; j++) {
-            int w = mem[64 + i * 4 + j];
-            int v = mem[32 + j * 4 + k];
+            int w = mem[weights_base + i * 4 + j];
+            int v = mem[v_base + j * 4 + k];
             sum = sum + w * v;
         }
-        mem[80 + i * 4 + k] = sum >> 8;
+        mem[out_base + i * 4 + k] = sum >> 8;
     }
 }

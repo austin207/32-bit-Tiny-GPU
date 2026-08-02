@@ -1513,14 +1513,21 @@ Fixed axelcc STMT_IF real cross-thread divergence bug: the taken group's
 Phase 5.1: 4x4 single-head self-attention (QK^T -> softmax -> weights.V),
   three chained axelcc kernels sharing memory, Q8 fixed-point, using the
   real hardware EXP8 LUT (Q6 domain) -- verified end to end on full GPU RTL
+Kernel parameter ABI: axelcc kernels can declare `int` parameters, loaded
+  from a reserved memory region (PARAM_BASE=0x100) into registers at kernel
+  entry -- no host API changes, parameters are just memory like any other
+  kernel input
+Multi-head attention: attn_scores/attn_softmax/attn_weighted_v parameterized
+  with base addresses, the same compiled binaries reused across two
+  independent heads (distinct Q/K/V per head) via the parameter ABI instead
+  of a recompile per head -- verified end to end on full GPU RTL
 ```
 
 Next:
 
 ```text
 Add axelcc-generated Q8 matvec/matmul beyond the MMIO accelerator path
-Define kernel parameter ABI
-Multi-head / larger seq_len attention
+Larger seq_len attention
 Improve compiler register allocation
 Add compiler golden-output tests (.hex/.axelbin content, not just RTL execution)
 Add constant folding

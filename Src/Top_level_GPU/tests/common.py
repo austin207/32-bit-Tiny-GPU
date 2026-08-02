@@ -15,6 +15,16 @@ NUM_CORES = 4
 THREADS_PER_CORE = 4
 TIMEOUT_CYCLES = 100000
 
+# Kernel parameter ABI (see docs/memory_map.md): axelcc loads declared
+# parameters from PARAM_BASE+i, in declaration order, before the kernel body
+# runs. Parameters are just memory, so setting them is a plain dict write.
+PARAM_BASE = 0x100
+
+
+def set_params(data_memory, *values):
+    for i, v in enumerate(values):
+        data_memory[PARAM_BASE + i] = v & 0xFFFFFFFF
+
 
 SCHED_STATES = {
     0: "IDLE",

@@ -23,13 +23,14 @@
 // scratch: pass 1 stores raw exp8(d) there, pass 2 overwrites it in place
 // with the normalized Q8 value once the row sum is known.
 //
-// Memory layout:
-//   48-63  scores[4][4]  (input, Q8, row-major, i*4+j)
-//   64-79  weights[4][4] (output, Q8, row-major, i*4+j)
-kernel void attn_softmax() {
+// Memory layout (base addresses supplied by the caller via the kernel
+// parameter ABI, so one compiled binary is reusable across heads):
+//   scores_base+0..15  scores[4][4]  (input, Q8, row-major, i*4+j)
+//   weights_base+0..15 weights[4][4] (output, Q8, row-major, i*4+j)
+kernel void attn_softmax(int scores_base, int weights_base) {
     int i = threadIdx;
-    int base = 48 + i * 4;
-    int obase = 64 + i * 4;
+    int base = scores_base + i * 4;
+    int obase = weights_base + i * 4;
 
     int m = mem[base + 0];
     if (mem[base + 1] > m) { m = mem[base + 1]; }

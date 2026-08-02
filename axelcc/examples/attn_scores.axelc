@@ -5,19 +5,20 @@
 // after the accumulation (not after each multiply) to avoid repeated
 // rounding loss -- same convention as the phase17/18 Q8 matmul kernels.
 //
-// Memory layout:
-//   0-15   Q[4][4]      (row-major, Q[i][k] at i*4+k)
-//   16-31  K[4][4]      (row-major, K[j][k] at 16 + j*4+k)
-//   48-63  scores[4][4] (output, row-major, i*4+j)
-kernel void attn_scores() {
+// Memory layout (base addresses supplied by the caller via the kernel
+// parameter ABI, so one compiled binary is reusable across heads):
+//   q_base+0..15      Q[4][4]      (row-major, Q[i][k] at q_base + i*4+k)
+//   k_base+0..15      K[4][4]      (row-major, K[j][k] at k_base + j*4+k)
+//   scores_base+0..15 scores[4][4] (output, row-major, scores_base + i*4+j)
+kernel void attn_scores(int q_base, int k_base, int scores_base) {
     int i = threadIdx;
     for (int j = 0; j < 4; j++) {
         int sum = 0;
         for (int k = 0; k < 4; k++) {
-            int qv = mem[i * 4 + k];
-            int kv = mem[16 + j * 4 + k];
+            int qv = mem[q_base + i * 4 + k];
+            int kv = mem[k_base + j * 4 + k];
             sum = sum + qv * kv;
         }
-        mem[48 + i * 4 + j] = sum >> 8;
+        mem[scores_base + i * 4 + j] = sum >> 8;
     }
 }

@@ -3,7 +3,7 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge
 
-from .common import init_bus, launch_kernel, u32_to_signed
+from .common import init_bus, launch_kernel, set_params, u32_to_signed
 from .memory_models import program_memory_model, data_memory_model
 
 
@@ -83,6 +83,7 @@ async def test_phase5_attn_weighted_v(dut):
     cocotb.start_soon(program_memory_model(dut, instructions_ref))
     cocotb.start_soon(data_memory_model(dut, data_memory))
 
+    set_params(data_memory, 32, 64, 80)  # v_base, weights_base, out_base
     cyc = await launch_kernel(dut, instructions_ref, instructions, blockDim=4)
     assert cyc is not None, "TIMEOUT: attn_weighted_v did not finish"
 
