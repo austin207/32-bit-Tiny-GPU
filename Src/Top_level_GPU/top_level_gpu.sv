@@ -157,7 +157,8 @@ genvar n;
 generate
     for (n = 0; n < NUM_CORES; n = n + 1) begin : accel_decode_gen
         assign accel_sel[n] = data_mem_req_valid[n] &&
-                              (data_mem_req_addr[n] >= 32'h1F0);
+                              (data_mem_req_addr[n] >= 32'h1F0) &&
+                              (data_mem_req_addr[n] <= 32'h1FF);
     end
 endgenerate
 

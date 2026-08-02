@@ -610,8 +610,13 @@ with `a` at `PARAM_BASE+0` and `b` at `PARAM_BASE+1` emits two `LDR`
 instructions from `0x100`/`0x101` before the `mem[0] = a + b` body.
 
 This mirrors the MMIO accelerator's existing convention of reserving a fixed
-address range (`0x1F0+`) for a special-purpose channel, just for passing
-kernel arguments instead of driving the matmul accelerator.
+address range (`0x1F0-0x1FF`, 16 words) for a special-purpose channel, just
+for passing kernel arguments instead of driving the matmul accelerator.
+(This window used to be open-ended -- `top_level_gpu.sv` routed every
+address `>= 0x1F0` to the accelerator's ctrl registers, capping all normal
+data memory at 496 words regardless of the backing memory's actual size.
+Fixed 2026-08-02 by bounding the decode to the accelerator's real 16-word
+footprint; addresses `>= 0x200` are ordinary data memory again.)
 
 ## Known memory limitations
 

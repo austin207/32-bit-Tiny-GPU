@@ -2,10 +2,16 @@ from cocotb.triggers import RisingEdge, Timer
 
 from tests.common import NUM_CORES, safe_int, safe_bit
 
-# Addresses >= ACCEL_CTRL_BASE are ctrl registers handled by the RTL mux.
-# The data_memory_model must skip them to avoid polluting the Python dict
-# and asserting spurious resp_valid for those cores.
+# ACCEL_CTRL_BASE..ACCEL_CTRL_TOP are ctrl registers handled by the RTL mux
+# (top_level_gpu.sv's accel_sel decode: addr >= 0x1F0 && addr <= 0x1FF, a
+# 16-word window, narrowed from an earlier open-ended `>= 0x1F0` that used
+# to claim the entire rest of the address space -- see project memory
+# project_accel_ctrl_address_ceiling.md). The data_memory_model must skip
+# only that window to avoid polluting the Python dict and asserting
+# spurious resp_valid for those cores; everything >= 0x200 is real data
+# memory again.
 ACCEL_CTRL_BASE = 0x1F0
+ACCEL_CTRL_TOP = 0x1FF
 
 
 async def program_memory_model(
@@ -70,9 +76,10 @@ async def data_memory_model(
     """
     Data memory model with optional debug.
 
-    Addresses >= ACCEL_CTRL_BASE (0x1F0) are skipped: the RTL address-decode
-    mux in top_level_gpu intercepts those requests and serves them from the
-    matmul_accelerator ctrl registers directly.
+    Addresses in [ACCEL_CTRL_BASE, ACCEL_CTRL_TOP] (0x1F0-0x1FF) are
+    skipped: the RTL address-decode mux in top_level_gpu intercepts those
+    requests and serves them from the matmul_accelerator ctrl registers
+    directly. Everything >= 0x200 is real data memory.
 
     debug=True enables memory transaction prints.
     Filter with:
@@ -116,7 +123,7 @@ async def data_memory_model(
                 continue
 
             # ── Phase 4: skip ctrl reg space — RTL handles these internally ──
-            if addr >= ACCEL_CTRL_BASE:
+            if ACCEL_CTRL_BASE <= addr <= ACCEL_CTRL_TOP:
                 if debug:
                     op = "READ" if rw else "WRITE"
                     print(
