@@ -1,0 +1,9 @@
+// De-risking test for compile-time constant folding: `2 + 3 * 4` and the
+// unary fold `-(1 + 2)` should each collapse to a single CONST instruction
+// instead of a chain of literal-loads + runtime ops.
+kernel void constfold() {
+    int x = 2 + 3 * 4;
+    int y = -(1 + 2);
+    mem[0] = x;
+    mem[1] = y;
+}

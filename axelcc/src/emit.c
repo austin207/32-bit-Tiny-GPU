@@ -62,6 +62,7 @@ void emit_nop  (InstrBuf *b)                           { push(b, n_type(0x00)); 
 void emit_sync (InstrBuf *b)                           { push(b, n_type(0x15)); }
 void emit_not  (InstrBuf *b, int rd, int rs) { push(b, r_type(0x0B,rd,rs,0)); }
 void emit_exp8 (InstrBuf *b, int rd, int rs)           { push(b, r_type(0x1B,rd,rs,0)); }
+void emit_relu (InstrBuf *b, int rd, int rs)           { push(b, r_type(0x17,rd,rs,0)); }
 
 void emit_brnzp(InstrBuf *b, int nzp, int sync_off, int branch_off) {
     uint32_t word = ((uint32_t)0x0E        << 26)

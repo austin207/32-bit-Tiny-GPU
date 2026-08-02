@@ -41,6 +41,34 @@ static void cg_err(CGen *g, int line, int col, const char *msg) {
     g->had_error = 1;
 }
 
+/* Register-reuse convention for temporaries (R20..R27, SEMA_TMP_BASE..
+ * SEMA_TMP_ONE-1): every "compound" eval_expr case (BINOP/UNOP/FMA/DOT4/
+ * EXP8/RELU) evaluates 1-3 children, then reclaims their temp slots
+ * (g->next_tmp = mark, where `mark` was captured before any child was
+ * evaluated) before allocating its own destination -- so the destination
+ * typically reuses (and numerically aliases) one of the children's now-
+ * dead registers, instead of always bumping to a brand-new slot. This
+ * turns "every node in a statement's expression tree holds its own
+ * register until the whole statement ends" into "peak temp usage tracks
+ * the expression tree's *depth*, not its *size*" -- real production
+ * kernels were already hitting 6 of the 8 available temp slots in a
+ * single statement (attn_scores.axelc) before this.
+ *
+ * This relies on rd==rs1/rs2/rs3 aliasing being safe on the real ALU/LSU
+ * datapath for a single instruction (source operands read before/at the
+ * same stage the destination is written -- standard for a simple in-order
+ * pipeline, and already proven for rd==rs1 by the existing for-loop
+ * increment, `emit_add(var_reg, var_reg, SEMA_TMP_ONE)` below in STMT_FOR).
+ * Permanent variable/parameter registers (R1-R19) can never be aliased
+ * this way: alloc_tmp() only ever returns [SEMA_TMP_BASE, SEMA_TMP_ONE),
+ * and a destination always comes from alloc_tmp(), never from a variable
+ * lookup.
+ *
+ * EXPR_MEM_LOAD is a deliberate exception: it does NOT reset next_tmp
+ * before allocating its destination, so the loaded value's register can
+ * never alias its own address register -- addr's own evaluation already
+ * self-cleans the temps it used, so allocating dst directly on top of
+ * whatever next_tmp already is (no reset) guarantees a fresh slot. */
 static int alloc_tmp(CGen *g) {
     if (g->next_tmp >= SEMA_TMP_ONE) {
         fprintf(stderr, "codegen: out of temporary registers\n");
@@ -82,6 +110,59 @@ static void patch_brnzp(InstrBuf *buf, int idx, int nzp, int sync_off, int branc
     ibuf_patch(buf, idx, word);
 }
 
+/* ── Constant folding ─────────────────────────────────────────────────────── */
+/* Recursively evaluates e at compile time if every leaf is a literal.
+ * Returns 1 and sets *out on success; returns 0 (leaving *out untouched) as
+ * soon as it hits anything non-constant (a variable, mem load, threadIdx,
+ * a builtin call, ...), so callers fall back to normal runtime codegen. */
+static int try_fold_const(const Expr *e, int *out) {
+    if (!e) return 0;
+
+    switch (e->kind) {
+        case EXPR_INT_LIT:
+            *out = e->ival;
+            return 1;
+
+        case EXPR_UNOP: {
+            int v;
+            if (!try_fold_const(e->unop.operand, &v)) return 0;
+            switch (e->unop.op) {
+                case TOK_MINUS: *out = -v; return 1;
+                case TOK_TILDE: *out = ~v; return 1;
+                default: return 0;
+            }
+        }
+
+        case EXPR_BINOP: {
+            int l, r;
+            if (!try_fold_const(e->binop.left,  &l)) return 0;
+            if (!try_fold_const(e->binop.right, &r)) return 0;
+            switch (e->binop.op) {
+                case TOK_PLUS:    *out = l + r; return 1;
+                case TOK_MINUS:   *out = l - r; return 1;
+                case TOK_STAR:    *out = l * r; return 1;
+                /* Skip folding (fall through to runtime DIV/MOD, unchanged
+                 * behavior) on statically-known division by zero -- adding
+                 * new compile-time error handling for that isn't this
+                 * pass's job. */
+                case TOK_SLASH:   if (r == 0) return 0; *out = l / r; return 1;
+                case TOK_PERCENT: if (r == 0) return 0; *out = l % r; return 1;
+                case TOK_SHR:     *out = l >> r; return 1;  /* matches emit_sar below */
+                case TOK_SHL:     *out = l << r; return 1;
+                case TOK_AMP:     *out = l & r; return 1;
+                case TOK_PIPE:    *out = l | r; return 1;
+                case TOK_CARET:   *out = l ^ r; return 1;
+                default:          return 0;   /* comparison ops -- never foldable here */
+            }
+        }
+
+        default:
+            /* IDENT, MEM_LOAD, THREAD_IDX/BLOCK_IDX/BLOCK_DIM, FMA/DOT4/
+             * EXP8/RELU -- none are compile-time constants. */
+            return 0;
+    }
+}
+
 /* ── Expression evaluation ────────────────────────────────────────────────── */
 /* Returns register holding result. May emit instructions. */
 static int eval_expr(CGen *g, const Expr *e) {
@@ -104,9 +185,29 @@ static int eval_expr(CGen *g, const Expr *e) {
         case EXPR_BLOCK_DIM:  return R31;
 
         case EXPR_BINOP: {
+            int cv;
+            /* CONST's 16-bit immediate is zero-extended by the hardware
+             * (core.sv: {16'b0, imm}), not sign-extended like LDR/STR's
+             * address offset -- unlike a literal reaching a register via
+             * runtime SUB(R0, x), which does real 32-bit arithmetic.
+             * Before this fold, no negative value could ever flow through
+             * emit_const (only unary-minus-over-SUB produced negatives).
+             * Only fold when the result fits emit_const's actual encoding;
+             * otherwise fall through to the runtime path below, which is
+             * correct for any 32-bit value. */
+            if (try_fold_const(e, &cv) && cv >= 0 && cv <= 0xFFFF) {
+                int t = alloc_tmp(g);
+                emit_const(g->buf, t, cv);
+                return t;
+            }
             /* Comparison ops are handled at the statement level (if/for), not here. */
+            int mark = g->next_tmp;
             int lreg = eval_expr(g, e->binop.left);
             int rreg = eval_expr(g, e->binop.right);
+            g->next_tmp = mark;   /* reclaim children's temp slots; dst below
+                                    * may reuse (and numerically alias) lreg
+                                    * and/or rreg -- see the register-reuse
+                                    * note above alloc_tmp(). */
             int dst  = alloc_tmp(g);
             switch (e->binop.op) {
                 case TOK_PLUS:    emit_add (g->buf, dst, lreg, rreg); break;
@@ -127,7 +228,17 @@ static int eval_expr(CGen *g, const Expr *e) {
         }
 
         case EXPR_UNOP: {
+            int cv;
+            /* See the EXPR_BINOP case above: only fold when the result fits
+             * emit_const's zero-extended 16-bit encoding. */
+            if (try_fold_const(e, &cv) && cv >= 0 && cv <= 0xFFFF) {
+                int t = alloc_tmp(g);
+                emit_const(g->buf, t, cv);
+                return t;
+            }
+            int mark = g->next_tmp;
             int sreg = eval_expr(g, e->unop.operand);
+            g->next_tmp = mark;
             int dst  = alloc_tmp(g);
             switch (e->unop.op) {
                 case TOK_MINUS:
@@ -150,9 +261,11 @@ static int eval_expr(CGen *g, const Expr *e) {
         }
 
         case EXPR_FMA: {
+            int mark = g->next_tmp;
             int a = eval_expr(g, e->fma.a);
             int b = eval_expr(g, e->fma.b);
             int c = eval_expr(g, e->fma.c);
+            g->next_tmp = mark;
             int dst = alloc_tmp(g);
             emit_fma(g->buf, dst, a, b, c);
             return dst;
@@ -164,17 +277,30 @@ static int eval_expr(CGen *g, const Expr *e) {
              * signed INT8 lanes of a/b. Not FMA (6'h0C, plain scalar
              * multiply-add) -- that was silently producing a scalar
              * multiply instead of a packed dot product. */
+            int mark = g->next_tmp;
             int a = eval_expr(g, e->dot4.a);
             int b = eval_expr(g, e->dot4.b);
+            g->next_tmp = mark;
             int dst = alloc_tmp(g);
             emit_dot(g->buf, dst, a, b, R0);
             return dst;
         }
 
         case EXPR_EXP8: {
+            int mark = g->next_tmp;
             int xreg = eval_expr(g, e->exp8.x);
+            g->next_tmp = mark;
             int dst  = alloc_tmp(g);
             emit_exp8(g->buf, dst, xreg);
+            return dst;
+        }
+
+        case EXPR_RELU: {
+            int mark = g->next_tmp;
+            int xreg = eval_expr(g, e->relu.x);
+            g->next_tmp = mark;
+            int dst  = alloc_tmp(g);
+            emit_relu(g->buf, dst, xreg);
             return dst;
         }
 

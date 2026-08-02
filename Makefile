@@ -23,6 +23,10 @@ assembler:
 
 test: assembler
 	@set -e; \
+	echo "========================================"; \
+	echo "Running axelcc golden-output tests"; \
+	echo "========================================"; \
+	$(MAKE) -C axelcc golden; \
 	for dir in $(TEST_DIRS); do \
 		echo "========================================"; \
 		echo "Running test in $$dir"; \

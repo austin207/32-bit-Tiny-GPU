@@ -1,0 +1,15 @@
+// De-risking test proving register reuse raises the practical complexity
+// ceiling, not just shortens code that already worked: under the old
+// bump-until-end-of-statement allocator, this single statement would need
+// roughly 2 temps per mem[] load (address + value) plus 1 per ADD with
+// zero reuse -- around 18+ simultaneous temps for a 9-term chain, blowing
+// the old 8-slot budget ("codegen: out of temporary registers"). With
+// register reuse, peak usage per the mark/reset/reuse scheme stays O(1)
+// (~3 temps) regardless of chain depth, since each ADD's operands are
+// reclaimed as soon as they're consumed.
+//
+// mem[0..8] = 1..9 -> mem[9] = sum(1..9) = 45
+kernel void regreuse_stress() {
+    mem[9] = mem[0] + mem[1] + mem[2] + mem[3] + mem[4]
+           + mem[5] + mem[6] + mem[7] + mem[8];
+}

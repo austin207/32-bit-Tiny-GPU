@@ -1,0 +1,17 @@
+// De-risking test for the EXPR_RELU codegen gap: relu(x) was fully
+// lexed/parsed/sema-checked but had zero case in codegen.c's eval_expr
+// switch, so calling it compiled to "unsupported expression kind" -- the
+// existing relu.axelc kernel computes ReLU manually via if/else and never
+// exercises the builtin. Same memory layout and expected values as
+// relu.axelc's own test, so the two are directly comparable.
+//
+// input:
+//   mem[0..3]
+//
+// output:
+//   mem[4..7]
+kernel void relu_builtin() {
+    int tid = threadIdx;
+    int val = mem[tid];
+    mem[4 + tid] = relu(val);
+}

@@ -1,0 +1,13 @@
+// De-risking test for register-reuse in codegen: forces the FMA
+// accumulate operand (rs3) to numerically alias the destination register
+// (rd) -- fma(a, b, x+y) with a/b/x/y all permanent parameter registers
+// means only `x+y` allocates a temp, and that temp's slot gets reclaimed
+// and reused as FMA's own destination. Existing kernels (test_fmatest,
+// test_dot4test) never naturally produce this specific rd==rs3 aliasing
+// shape, so this kernel exists purely to force and verify it on real RTL.
+//
+// a=2, b=3, x=4, y=5 -> r = a*b + (x+y) = 6 + 9 = 15
+kernel void fma_alias(int a, int b, int x, int y) {
+    int r = fma(a, b, x + y);
+    mem[0] = r;
+}

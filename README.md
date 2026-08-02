@@ -1521,6 +1521,16 @@ Multi-head attention: attn_scores/attn_softmax/attn_weighted_v parameterized
   with base addresses, the same compiled binaries reused across two
   independent heads (distinct Q/K/V per head) via the parameter ABI instead
   of a recompile per head -- verified end to end on full GPU RTL
+Compiler quality pass: axelcc golden-output tests (axelcc/tests/golden_test.py,
+  pins exact .hex instruction sequences, not just RTL execution results);
+  fixed a latent codegen gap where relu(x) was fully parsed/sema-checked but
+  had no case in eval_expr; compile-time constant folding (with a deliberate
+  carve-out for CONST's zero-extended 16-bit immediate -- a folded negative
+  value must stay a runtime SUB, not a CONST); reworked temp-register
+  allocation from bump-until-end-of-statement to mark/reset/reuse, raising
+  peak temp usage from O(expression size) to O(expression depth) -- every
+  new register-aliasing shape this introduced (rd==rs1/rs2/rs3) empirically
+  verified correct on real RTL simulation before trusting it generally
 ```
 
 Next:
@@ -1528,10 +1538,6 @@ Next:
 ```text
 Add axelcc-generated Q8 matvec/matmul beyond the MMIO accelerator path
 Larger seq_len attention
-Improve compiler register allocation
-Add compiler golden-output tests (.hex/.axelbin content, not just RTL execution)
-Add constant folding
-Add dead-code elimination
 Add local array support
 Improve accelerator throughput
 Explore pipelined / tiled accelerator design
