@@ -63,6 +63,7 @@ void emit_sync (InstrBuf *b)                           { push(b, n_type(0x15)); 
 void emit_not  (InstrBuf *b, int rd, int rs) { push(b, r_type(0x0B,rd,rs,0)); }
 void emit_exp8 (InstrBuf *b, int rd, int rs)           { push(b, r_type(0x1B,rd,rs,0)); }
 void emit_relu (InstrBuf *b, int rd, int rs)           { push(b, r_type(0x17,rd,rs,0)); }
+void emit_clamp(InstrBuf *b, int rd, int rs)           { push(b, r_type(0x18,rd,rs,0)); }
 
 void emit_brnzp(InstrBuf *b, int nzp, int sync_off, int branch_off) {
     uint32_t word = ((uint32_t)0x0E        << 26)
@@ -71,3 +72,22 @@ void emit_brnzp(InstrBuf *b, int nzp, int sync_off, int branch_off) {
                   | ((uint32_t)(branch_off & 0xFFF));
     push(b, word);
 }
+
+/* CALL: same B-type layout as BRnzp (0x0E), always unconditional (nzp=111
+ * hardcoded — the existing "always taken" idiom every unconditional branch
+ * in this compiler already relies on, e.g. STMT_FOR's back-edge), plus the
+ * hardware pushes the return address (this instruction's own PC + 1) onto
+ * call_stack.sv before jumping. See docs/subroutines.md (RTL spec) for the
+ * call_stack.sv/pc.sv/decoder.sv side. */
+void emit_call(InstrBuf *b, int sync_offset, int call_offset) {
+    uint32_t word = ((uint32_t)0x1C              << 26)
+                  | ((uint32_t)0x7                << 23)   /* nzp = ALL, always taken */
+                  | ((uint32_t)(sync_offset & 0x7FF) << 12)
+                  | ((uint32_t)(call_offset & 0xFFF));
+    push(b, word);
+}
+
+/* SRET: N-type like RET (0x12), but pops call_stack.sv and jumps there
+ * absolutely instead of terminating the kernel/block. Distinct opcode from
+ * RET so kernel-termination semantics are completely untouched. */
+void emit_sret(InstrBuf *b) { push(b, n_type(0x1D)); }

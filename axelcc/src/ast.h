@@ -15,6 +15,8 @@ typedef enum {
     EXPR_DOT4,          // dot4(a, b)
     EXPR_EXP8,          // exp8(x)
     EXPR_RELU,          // relu(x)  — single-value ReLU, no divergence
+    EXPR_CLAMP,         // clamp(x) — saturate to int8 range [-128, 127]
+    EXPR_CALL,          // name(args...) — call a `func`-declared subroutine
 } ExprKind;
 
 typedef struct Expr Expr;
@@ -48,6 +50,12 @@ struct Expr {
 
         // EXPR_RELU
         struct { Expr *x; } relu;
+
+        // EXPR_CLAMP
+        struct { Expr *x; } clamp;
+
+        // EXPR_CALL: name(args...) — args is a heap array of arg_count Expr*
+        struct { char *name; Expr **args; int arg_count; } call;
     };
 };
 
@@ -58,7 +66,7 @@ typedef enum {
     STMT_MEM_STORE,     // mem[addr] = expr;
     STMT_IF,            // if (cond) { ... } else { ... }
     STMT_FOR,           // for (int i = init; i < bound; i++) { ... }
-    STMT_RETURN,        // return;
+    STMT_RETURN,        // return; (kernel, no value) or return expr; (func, has value)
     STMT_MMIO_MATMUL,   // mmio_matmul(a_base, b_base, c_base, M, N, K, scale);
 } StmtKind;
 
@@ -110,6 +118,10 @@ struct Stmt {
             Expr *M, *N, *K;
             Expr *scale;
         } mmio;
+
+        // STMT_RETURN: val is NULL for a kernel's bare `return;`,
+        // non-NULL for a func's `return expr;`.
+        struct { Expr *val; } ret;
     };
 };
 
@@ -126,10 +138,27 @@ typedef struct {
     int      line, col;
 } Kernel;
 
+// ── Func (subroutine, callable via CALL/SRET) ───────────────────────────────
+// Same shape as Kernel, but: (1) params/locals are register-allocated into a
+// small reserved window shared by every func (only one call is ever "in
+// flight" at a time — no nesting, see sema.c), not the kernel's normal
+// SEMA_MAX_VARS range; (2) the body must end with `return expr;`, not fall
+// off the end; (3) a func's body may not itself contain a call expression
+// (sema-enforced — see the register-window rationale in sema.c).
+typedef struct {
+    char     *name;
+    Param    *params;
+    int       param_count;
+    StmtList *body;
+    int       line, col;
+} Func;
+
 // ── Program ───────────────────────────────────────────────────────────────────
 typedef struct {
     Kernel  *kernels;       // array of top-level kernels
     int      kernel_count;
+    Func    *funcs;         // array of top-level func (subroutine) declarations
+    int      func_count;
     char    *filename;
 } Program;
 
@@ -142,6 +171,8 @@ Expr     *ast_mem_load   (Expr *addr, int line, int col);
 Expr     *ast_fma        (Expr *a, Expr *b, Expr *c, int line, int col);
 Expr     *ast_dot4       (Expr *a, Expr *b, int line, int col);
 Expr     *ast_exp8       (Expr *x, int line, int col);
+Expr     *ast_clamp      (Expr *x, int line, int col);
+Expr     *ast_call       (const char *name, Expr **args, int arg_count, int line, int col);
 
 Stmt     *ast_var_decl   (const char *name, Expr *init, int line, int col);
 Stmt     *ast_assign     (const char *name, Expr *val, int line, int col);
@@ -150,7 +181,7 @@ Stmt     *ast_if         (Expr *cond, StmtList *then_body, StmtList *else_body,
                           int line, int col);
 Stmt     *ast_for        (const char *var, Expr *init, Expr *bound,
                           StmtList *body, int line, int col);
-Stmt     *ast_return     (int line, int col);
+Stmt     *ast_return     (Expr *val, int line, int col);
 Stmt     *ast_mmio       (Expr *a, Expr *b, Expr *c,
                           Expr *M, Expr *N, Expr *K, Expr *scale,
                           int line, int col);

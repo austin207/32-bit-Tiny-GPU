@@ -37,6 +37,9 @@ void emit_nop  (InstrBuf *b);
 void emit_not  (InstrBuf *b, int rd, int rs);
 void emit_exp8 (InstrBuf *b, int rd, int rs);
 void emit_relu (InstrBuf *b, int rd, int rs);
+void emit_clamp(InstrBuf *b, int rd, int rs);
+void emit_call  (InstrBuf *b, int sync_offset, int call_offset);
+void emit_sret  (InstrBuf *b);
 
 // Patch: overwrite instruction at index with new value
 void ibuf_patch(InstrBuf *b, int idx, uint32_t word);

@@ -1,0 +1,18 @@
+// De-risk test for the new func/CALL/SRET subroutine mechanism (this
+// session's addition): a trivial `add3` subroutine, called twice from the
+// kernel body, proves (a) params land in the right registers, (b) the
+// return value survives the call boundary, (c) calling the SAME func twice
+// in a row doesn't corrupt state (only one call is ever "in flight" -- see
+// sema.h's register-window rationale), and (d) the func body is placed
+// after the kernel's own RET and only reached via CALL, never fallthrough.
+func int add3(int a, int b, int c) {
+    int s = a + b + c;
+    return s;
+}
+
+kernel void test_func_basic(int base) {
+    int x = add3(1, 2, 3);
+    int y = add3(10, 20, 30);
+    mem[base] = x;
+    mem[base + 1] = y;
+}

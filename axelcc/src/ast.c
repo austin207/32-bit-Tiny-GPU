@@ -67,6 +67,20 @@ Expr *ast_exp8(Expr *x, int line, int col) {
     return e;
 }
 
+Expr *ast_clamp(Expr *x, int line, int col) {
+    Expr *e = new_expr(EXPR_CLAMP, line, col);
+    e->clamp.x = x;
+    return e;
+}
+
+Expr *ast_call(const char *name, Expr **args, int arg_count, int line, int col) {
+    Expr *e = new_expr(EXPR_CALL, line, col);
+    e->call.name = strdup(name);
+    e->call.args = args;
+    e->call.arg_count = arg_count;
+    return e;
+}
+
 // ── Statements ────────────────────────────────────────────────────────────────
 
 static Stmt *new_stmt(StmtKind kind, int line, int col) {
@@ -119,8 +133,10 @@ Stmt *ast_for(const char *var, Expr *init, Expr *bound,
     return s;
 }
 
-Stmt *ast_return(int line, int col) {
-    return new_stmt(STMT_RETURN, line, col);
+Stmt *ast_return(Expr *val, int line, int col) {
+    Stmt *s = new_stmt(STMT_RETURN, line, col);
+    s->ret.val = val;
+    return s;
 }
 
 Stmt *ast_mmio(Expr *a, Expr *b, Expr *c,
@@ -160,6 +176,12 @@ static void free_expr(Expr *e) {
         case EXPR_DOT4:     free_expr(e->dot4.a); free_expr(e->dot4.b); break;
         case EXPR_EXP8:     free_expr(e->exp8.x); break;
         case EXPR_RELU:     free_expr(e->relu.x); break;
+        case EXPR_CLAMP:    free_expr(e->clamp.x); break;
+        case EXPR_CALL:
+            free(e->call.name);
+            for (int i = 0; i < e->call.arg_count; i++) free_expr(e->call.args[i]);
+            free(e->call.args);
+            break;
         default: break;
     }
     free(e);
@@ -190,6 +212,9 @@ static void free_stmt(Stmt *s) {
             free_expr(s->mmio.M); free_expr(s->mmio.N);
             free_expr(s->mmio.K); free_expr(s->mmio.scale);
             break;
+        case STMT_RETURN:
+            free_expr(s->ret.val);
+            break;
         default: break;
     }
     free(s);
@@ -215,6 +240,15 @@ void ast_free_program(Program *prog) {
         free_stmtlist(k->body);
     }
     free(prog->kernels);
+    for (int i = 0; i < prog->func_count; i++) {
+        Func *f = &prog->funcs[i];
+        free(f->name);
+        for (int j = 0; j < f->param_count; j++)
+            free(f->params[j].name);
+        free(f->params);
+        free_stmtlist(f->body);
+    }
+    free(prog->funcs);
     free(prog->filename);
     free(prog);
 }
@@ -266,6 +300,15 @@ static void print_expr(const Expr *e, int depth) {
             printf("RELU\n");
             print_expr(e->relu.x, depth + 1);
             break;
+        case EXPR_CLAMP:
+            printf("CLAMP\n");
+            print_expr(e->clamp.x, depth + 1);
+            break;
+        case EXPR_CALL:
+            printf("CALL(%s)\n", e->call.name);
+            for (int i = 0; i < e->call.arg_count; i++)
+                print_expr(e->call.args[i], depth + 1);
+            break;
     }
 }
 
@@ -312,6 +355,7 @@ static void print_stmt(const Stmt *s, int depth) {
             break;
         case STMT_RETURN:
             printf("RETURN\n");
+            if (s->ret.val) print_expr(s->ret.val, depth + 1);
             break;
         case STMT_MMIO_MATMUL:
             printf("MMIO_MATMUL\n");
@@ -326,6 +370,17 @@ static void print_stmtlist(const StmtList *list, int depth) {
 
 void ast_print_program(const Program *prog) {
     printf("Program: %s\n", prog->filename ? prog->filename : "<unknown>");
+    for (int i = 0; i < prog->func_count; i++) {
+        const Func *f = &prog->funcs[i];
+        printf("  func int %s(", f->name);
+        for (int j = 0; j < f->param_count; j++) {
+            if (j) printf(", ");
+            printf("int %s", f->params[j].name);
+        }
+        printf(") {\n");
+        print_stmtlist(f->body, 2);
+        printf("  }\n");
+    }
     for (int i = 0; i < prog->kernel_count; i++) {
         const Kernel *k = &prog->kernels[i];
         printf("  kernel %s(", k->name);

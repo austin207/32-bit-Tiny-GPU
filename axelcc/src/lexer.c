@@ -48,6 +48,7 @@ typedef struct { const char *kw; TokenType tok; } KWEntry;
 
 static const KWEntry KEYWORDS[] = {
     {"kernel",      TOK_KERNEL},
+    {"func",        TOK_FUNC},
     {"void",        TOK_VOID},
     {"int",         TOK_INT},
     {"return",      TOK_RETURN},
@@ -59,6 +60,7 @@ static const KWEntry KEYWORDS[] = {
     {"dot4",        TOK_DOT4},
     {"exp8",        TOK_EXP8},
     {"relu",        TOK_RELU},
+    {"clamp",       TOK_CLAMP},
     {"mmio_matmul", TOK_MMIO_MATMUL},
     {"threadIdx",   TOK_THREAD_IDX},
     {"blockIdx",    TOK_BLOCK_IDX},
@@ -194,6 +196,7 @@ const char *tok_name(TokenType t) {
         case TOK_INT_LIT:    return "INT_LIT";
         case TOK_IDENT:      return "IDENT";
         case TOK_KERNEL:     return "kernel";
+        case TOK_FUNC:       return "func";
         case TOK_VOID:       return "void";
         case TOK_INT:        return "int";
         case TOK_RETURN:     return "return";
@@ -205,6 +208,7 @@ const char *tok_name(TokenType t) {
         case TOK_DOT4:       return "dot4";
         case TOK_EXP8:       return "exp8";
         case TOK_RELU:       return "relu";
+        case TOK_CLAMP:      return "clamp";
         case TOK_MMIO_MATMUL:return "mmio_matmul";
         case TOK_THREAD_IDX: return "threadIdx";
         case TOK_BLOCK_IDX:  return "blockIdx";

@@ -17,7 +17,9 @@ module decoder (
     output logic mem_read_en,
     output logic mem_write_en,
     output logic branch_en,
-    output logic nzp_en
+    output logic nzp_en,
+    output logic call_en,
+    output logic sret_en
 );
 
     // Raw instruction field extraction
@@ -39,6 +41,8 @@ module decoder (
         branch_en     = 1'b0;
         nzp_en        = 1'b0;
         sync_en       = 1'b0;
+        call_en       = 1'b0;
+        sret_en       = 1'b0;
 
         case (opcode)
             6'h00: begin
@@ -88,6 +92,16 @@ module decoder (
             6'h15: begin
                 // SYNC
                 sync_en = 1'b1;
+            end
+
+            6'h1C: begin
+                // CALL: unconditional relative jump + push return PC
+                call_en = 1'b1;
+            end
+
+            6'h1D: begin
+                // SRET: pop call stack, absolute jump to popped return PC
+                sret_en = 1'b1;
             end
 
             default: begin

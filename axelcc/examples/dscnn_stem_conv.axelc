@@ -1,0 +1,48 @@
+// DS-CNN stem convolution: Cin=1, 5x3 kernel, one-shot (only one invocation
+// in the graph, so no parameter-reuse pattern needed unlike dscnn_dwconv/
+// dscnn_pwconv). Structurally a Cin=1 special case of dscnn_dwconv.axelc's
+// tap-flattening idiom (kh = tap/3, kw = tap%3), just with 15 taps instead
+// of 9 and no per-channel input-plane offset -- every output channel reads
+// the SAME single input plane, only the weights differ per channel.
+//
+// Channel parallelism: launch with num_blocks=4, blockDim=4 (Cout=16 fixed
+// for this model's stem layer), oc = blockIdx*4 + threadIdx.
+//
+// Weight layout: 15 taps per output channel, 1 int8 per word, row-major
+// (w_base + oc*15 + kh*3+kw). Input layout: single padded plane, 1 int8
+// per word (in_base + row*W_padded + col) -- padding border prefill is
+// host-side, same convention as dscnn_dwconv.axelc.
+// Output layout: channel-planar (out_base + oc*H_out*W_out + row*W_out + col).
+//
+// Requantization: same per-output-channel clamp(((acc*mult[oc]+
+// 1<<(shift[oc]-1))>>shift[oc])+out_zp) scheme as dscnn_dwconv.axelc --
+// see that file for the full derivation (per-channel weight quantization,
+// round_bias derived in-kernel from shift). Both hoisted once per thread
+// since they're invariant across the row/col loop.
+kernel void dscnn_stem_conv(
+    int in_base, int out_base, int w_base, int bias_eff_base,
+    int H_out, int W_out, int W_padded,
+    int stride, int mult_base, int shift_base, int out_zp
+) {
+    int oc = blockIdx * 4 + threadIdx;
+    int w_oc_base = oc * 15;
+    int oc_mult = mem[mult_base + oc];
+    int oc_shift = mem[shift_base + oc];
+
+    for (int row = 0; row < H_out; row++) {
+        for (int col = 0; col < W_out; col++) {
+            int acc = mem[bias_eff_base + oc];
+            for (int tap = 0; tap < 15; tap++) {
+                acc = fma(
+                    mem[in_base
+                        + (row * stride + tap / 3) * W_padded
+                        + (col * stride + tap % 3)],
+                    mem[w_base + w_oc_base + tap],
+                    acc
+                );
+            }
+            mem[out_base + oc * H_out * W_out + row * W_out + col] =
+                clamp(((acc * oc_mult + (1 << (oc_shift - 1))) >> oc_shift) + out_zp);
+        }
+    }
+}

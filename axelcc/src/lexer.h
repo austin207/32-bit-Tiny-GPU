@@ -9,6 +9,7 @@ typedef enum {
 
     // Keywords
     TOK_KERNEL,         // kernel
+    TOK_FUNC,           // func — subroutine declaration, callable via CALL/SRET
     TOK_VOID,           // void
     TOK_INT,            // int
     TOK_RETURN,         // return
@@ -22,6 +23,7 @@ typedef enum {
     TOK_DOT4,           // dot4
     TOK_EXP8,           // exp8
     TOK_RELU,           // relu
+    TOK_CLAMP,          // clamp
     TOK_MMIO_MATMUL,    // mmio_matmul
 
     // GPU built-in read-only vars

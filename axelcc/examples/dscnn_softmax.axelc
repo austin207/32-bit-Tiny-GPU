@@ -1,0 +1,38 @@
+// DS-CNN final softmax (one-shot, 18-way in the real model). A direct
+// generalization of attn_softmax.axelc from N=4 (hand-unrolled, row-
+// parallel across threadIdx) to a real N-length loop over a single vector
+// -- there's only one class-score vector here, not one per attention row,
+// so blockDim=1/num_blocks=1, no threadIdx-based row parallelism.
+//
+// Three passes, same structure as attn_softmax.axelc: (1) find the max,
+// (2) rescale each (score-max) into exp8's Q6 domain and accumulate the
+// exp8 sum, (3) normalize and requantize to the output's int8 domain.
+// `exp_shift` (the rescale before exp8) is a runtime param, not a hardcoded
+// ">>2" like attn_softmax.axelc, because dscnn's real int8 logit scale
+// differs from attention's Q8 convention -- host-derived per this specific
+// graph, not a hardware change. The CLAMP builtin replaces attn_softmax's
+// explicit if-based floor-clamp: since score-max is always <=0 here,
+// CLAMP's upper bound never triggers, only its lower bound (-128) does,
+// which is exactly the floor attn_softmax's if achieves.
+//
+// Input layout: flat (in_base + i), one score per class.
+// Output layout: flat (out_base + i), requantized int8 probability.
+kernel void dscnn_softmax(int in_base, int out_base, int N, int exp_shift, int out_zp) {
+    int m = mem[in_base];
+    for (int i = 1; i < N; i++) {
+        if (mem[in_base + i] > m) { m = mem[in_base + i]; }
+    }
+
+    int sum = 0;
+    for (int j = 0; j < N; j++) {
+        int d = clamp((mem[in_base + j] - m) >> exp_shift);
+        int e = exp8(d);
+        mem[out_base + j] = e;
+        sum = sum + e;
+    }
+
+    for (int k = 0; k < N; k++) {
+        int e2 = mem[out_base + k];
+        mem[out_base + k] = e2 * 256 / sum + out_zp;
+    }
+}

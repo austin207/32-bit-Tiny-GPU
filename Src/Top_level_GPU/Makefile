@@ -2,6 +2,7 @@ TOPLEVEL_LANG = verilog
 
 VERILOG_SOURCES = $(shell pwd)/top_level_gpu.sv \
                   $(shell pwd)/../warp_stack/warp_stack.sv \
+                  $(shell pwd)/../call_stack/call_stack.sv \
                   $(shell pwd)/../matmul_accelerator/matmul_accelerator.sv \
                   $(shell pwd)/../memory_controller/mem_controller.sv \
                   $(shell pwd)/../device_control_register/dcr.sv \
@@ -20,7 +21,7 @@ SIM = icarus
 
 export PYTHONPATH := $(shell pwd):$(PYTHONPATH)
 
-COCOTB_TEST_MODULES ?= test_top_level_gpu,tests.test_phase08_mlp,tests.test_phase09_ldr,tests.test_phase10_mlp_8out,tests.test_phase11_mlp_8in,tests.test_phase12_mlp_q6,tests.test_phase13_digit_hidden,tests.test_phase14_digit_output,tests.test_phase15_digit64_hidden,tests.test_phase16_digit64_classifier,tests.test_phase17_q8_matvec,tests.test_phase18_q8_matmul,tests.test_phase19_q8_matmul_4x8,tests.test_phase20_q8_matmul_4x16,tests.test_phase21_accel_matmul,tests.test_axelcc_relu,tests.test_axelcc_loopsum,tests.test_axelcc_fmatest,tests.test_axelcc_ifelse,tests.test_axelcc_ltcheck,tests.test_axelcc_matmultest,tests.test_axelcc_dot4test,tests.test_axelcc_chain,tests.test_axelcc_divmod,tests.test_axelcc_nestedfor,tests.test_phase5_attn_scores,tests.test_axelcc_expif,tests.test_axelcc_ifdiverge,tests.test_phase5_attn_softmax,tests.test_phase5_attn_weighted_v,tests.test_phase5_attn_chain,tests.test_axelcc_params,tests.test_phase5_attn_multihead,tests.test_axelcc_relu_builtin,tests.test_axelcc_constfold,tests.test_axelcc_fma_alias,tests.test_axelcc_regreuse_stress
+COCOTB_TEST_MODULES ?= test_top_level_gpu,tests.test_phase08_mlp,tests.test_phase09_ldr,tests.test_phase10_mlp_8out,tests.test_phase11_mlp_8in,tests.test_phase12_mlp_q6,tests.test_phase13_digit_hidden,tests.test_phase14_digit_output,tests.test_phase15_digit64_hidden,tests.test_phase16_digit64_classifier,tests.test_phase17_q8_matvec,tests.test_phase18_q8_matmul,tests.test_phase19_q8_matmul_4x8,tests.test_phase20_q8_matmul_4x16,tests.test_phase21_accel_matmul,tests.test_axelcc_relu,tests.test_axelcc_loopsum,tests.test_axelcc_fmatest,tests.test_axelcc_ifelse,tests.test_axelcc_ltcheck,tests.test_axelcc_matmultest,tests.test_axelcc_dot4test,tests.test_axelcc_chain,tests.test_axelcc_divmod,tests.test_axelcc_nestedfor,tests.test_phase5_attn_scores,tests.test_axelcc_expif,tests.test_axelcc_ifdiverge,tests.test_phase5_attn_softmax,tests.test_phase5_attn_weighted_v,tests.test_phase5_attn_chain,tests.test_axelcc_params,tests.test_phase5_attn_multihead,tests.test_axelcc_relu_builtin,tests.test_axelcc_constfold,tests.test_axelcc_fma_alias,tests.test_axelcc_regreuse_stress,tests.test_axelcc_clamp_builtin,tests.test_axelcc_blockidx,tests.test_dscnn_dwconv,tests.test_dscnn_pwconv,tests.test_dscnn_stem_conv,tests.test_dscnn_maxpool,tests.test_dscnn_fc,tests.test_dscnn_softmax,tests.test_axelcc_func_basic
 
 include $(shell cocotb-config --makefiles)/Makefile.sim
 

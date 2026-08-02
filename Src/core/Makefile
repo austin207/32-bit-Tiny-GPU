@@ -2,6 +2,7 @@ TOPLEVEL_LANG = verilog
 
 VERILOG_SOURCES = $(shell pwd)/core.sv \
                   $(shell pwd)/../warp_stack/warp_stack.sv \
+                  $(shell pwd)/../call_stack/call_stack.sv \
                   $(shell pwd)/../memory_controller/mem_controller.sv \
                   $(shell pwd)/../scheduler/scheduler.sv \
                   $(shell pwd)/../fetcher/fetcher.sv \

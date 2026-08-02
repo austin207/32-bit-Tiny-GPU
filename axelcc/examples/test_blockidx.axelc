@@ -1,0 +1,21 @@
+// De-risking test for `blockIdx` combined with num_blocks > 1: every kernel
+// in this repo so far has used blockDim/threadIdx for parallelism with
+// num_blocks=1 (a single block), so EXPR_BLOCK_IDX has only ever been
+// exercised as "always 0" internally, never as a real per-block register
+// read across multiple dispatched blocks. The upcoming DS-CNN depthwise/
+// pointwise/maxpool kernels rely on `channel = blockIdx*4 + threadIdx` to
+// parallelize across channel groups larger than one block's threadDim -- so
+// this needs its own proof on real RTL before any conv kernel depends on it.
+//
+// Launch with num_blocks=4, blockDim=4 (16 threads total, matching the
+// depthwise block0 channel count C=16): each thread computes its own
+// globally-unique channel index and stores it at that address.
+//
+// output:
+//   mem[0..15] = [0, 1, 2, ..., 15]
+kernel void blockidx_test() {
+    int tid = threadIdx;
+    int bid = blockIdx;
+    int val = bid * 4 + tid;
+    mem[val] = val;
+}

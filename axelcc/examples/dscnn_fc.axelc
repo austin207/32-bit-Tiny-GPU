@@ -1,0 +1,42 @@
+// DS-CNN fully-connected layer (one-shot, 48->18 in the real model): the
+// same dot4 channel-chunked accumulation as dscnn_pwconv.axelc, degenerate
+// to HW=1 (no spatial loop, no per-pixel addressing term).
+//
+// Thread mapping deliberately differs from every other DS-CNN kernel here:
+// the real model's Cout=18 is NOT a multiple of 4, so the usual
+// blockIdx*4+threadIdx mapping (which relies on Cout%4==0) doesn't apply.
+// Launch with blockDim=1, num_blocks=Cout, oc=blockIdx instead -- one
+// thread per output class, correct for any Cout, at the cost of using only
+// 1 of each core's 4 lanes (acceptable, this phase is correctness-first).
+//
+// Input layout: flat (in_base + channel), no spatial/planar term.
+// Weight layout: host-packed 4 input channels per word (Cin4 = Cin/4 words
+// per output channel), same convention as dscnn_pwconv.axelc.
+// Output layout: one value per class (out_base + oc).
+//
+// Requantization: same per-output-channel clamp(((acc*mult[oc]+
+// 1<<(shift[oc]-1))>>shift[oc])+out_zp) scheme as dscnn_dwconv.axelc --
+// see that file for the full derivation. No hoisting needed here (unlike
+// the spatial kernels): each thread only reaches the requant line once, so
+// a single mem[] read of mult[oc]/shift[oc] is already optimal.
+kernel void dscnn_fc(
+    int in_base, int out_base, int w_base, int bias_eff_base,
+    int Cin4, int mult_base, int shift_base, int out_zp
+) {
+    int oc = blockIdx;
+    int w_oc_base = oc * Cin4;
+    int acc = mem[bias_eff_base + oc];
+
+    for (int chunk = 0; chunk < Cin4; chunk++) {
+        acc = acc + dot4(
+            (mem[in_base + chunk * 4 + 0] & 255)
+            | ((mem[in_base + chunk * 4 + 1] & 255) << 8)
+            | ((mem[in_base + chunk * 4 + 2] & 255) << 16)
+            | ((mem[in_base + chunk * 4 + 3] & 255) << 24),
+            mem[w_base + w_oc_base + chunk]
+        );
+    }
+
+    int oc_shift = mem[shift_base + oc];
+    mem[out_base + oc] = clamp(((acc * mem[mult_base + oc] + (1 << (oc_shift - 1))) >> oc_shift) + out_zp);
+}

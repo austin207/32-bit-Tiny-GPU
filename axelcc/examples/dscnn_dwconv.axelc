@@ -1,0 +1,60 @@
+// DS-CNN depthwise 3x3 convolution, one compiled kernel reused across all 4
+// depthwise-separable blocks (channel counts 16/48/48/48) via the kernel
+// parameter ABI -- same "one binary, many parameter-driven invocations"
+// pattern proven by multi-head attention.
+//
+// Channel parallelism: launch with num_blocks=C/4, blockDim=4, so
+// channel = blockIdx*4 + threadIdx covers every channel (C always a
+// multiple of 4 in this model). Spatial padding is NOT handled here -- the
+// host pre-fills each padded input tensor's border with that tensor's own
+// zero_point in data_memory before this kernel launches (axelcc's `if` can
+// only express a single comparison, sema.c:64-79, so a real 2D bounds check
+// per tap can't be expressed in-kernel). `bias_eff_base` values are the
+// host-folded `bias - in_zp*sum(weights)` (avoids overflowing dot4/fma's
+// raw-int8 inputs with a runtime zero-point subtraction).
+//
+// Weight layout: 9 taps per channel, 1 int8 per word, row-major
+// (w_base + channel*9 + kh*3+kw), flattened as a single `tap` index
+// (kh = tap/3, kw = tap%3) so the 3x3 window is one loop, not two.
+//
+// Input layout: channel-planar (CHW), padded, 1 int8 per word
+// (in_base + channel*H_padded*W_padded + row*W_padded + col).
+// Output layout: channel-planar, 1 int8 per word, no padding
+// (out_base + channel*H_out*W_out + row*W_out + col).
+//
+// Requantization: acc (int32, accumulated via fma) -> clamp(((acc*mult +
+// round_bias) >> shift) + out_zp) -- standard TFLite int8 fixed-point
+// rescale. mult/shift are PER-OUTPUT-CHANNEL arrays, not scalars: the real
+// model's conv/depthwise weight tensors use TFLite's per-channel (per-axis)
+// quantization, one weight scale per output channel, so M =
+// in_scale*w_scale[oc]/out_scale genuinely differs by channel within a
+// single invocation, not just across the 4 reused invocations. round_bias
+// is derived in-kernel as 1<<(shift-1) rather than passed as a third array
+// (saves a param/register and a host-side array; host must never choose
+// shift=0 for any channel, since 1<<(-1) is undefined).
+kernel void dscnn_dwconv(
+    int in_base, int out_base, int w_base, int bias_eff_base,
+    int H_out, int W_out, int H_padded, int W_padded,
+    int stride, int mult_base, int shift_base, int out_zp
+) {
+    int channel = blockIdx * 4 + threadIdx;
+    int channel_in_base = channel * H_padded * W_padded;
+    int channel_shift = mem[shift_base + channel];
+
+    for (int row = 0; row < H_out; row++) {
+        for (int col = 0; col < W_out; col++) {
+            int acc = mem[bias_eff_base + channel];
+            for (int tap = 0; tap < 9; tap++) {
+                acc = fma(
+                    mem[in_base + channel_in_base
+                        + (row * stride + tap / 3) * W_padded
+                        + (col * stride + tap % 3)],
+                    mem[w_base + channel * 9 + tap],
+                    acc
+                );
+            }
+            mem[out_base + channel * H_out * W_out + row * W_out + col] =
+                clamp(((acc * mem[mult_base + channel] + (1 << (channel_shift - 1))) >> channel_shift) + out_zp);
+        }
+    }
+}

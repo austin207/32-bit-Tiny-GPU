@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "codegen.h"
 #include "lexer.h"
 #include <stdio.h>
@@ -26,6 +27,13 @@
 #define NZP_ZP  0b011
 #define NZP_ALL 0b111
 
+/* ── Call-site backpatch list ────────────────────────────────────────────── */
+/* CALL's target (a func's entry point) isn't known until every func has
+ * been laid out, which happens after the kernel body -- same two-pass
+ * shape as STMT_IF/STMT_FOR's existing backpatch, just deferred across the
+ * whole program instead of within one statement. */
+typedef struct { int instr_idx; char *func_name; } CallSite;
+
 /* ── Codegen context ─────────────────────────────────────────────────────── */
 typedef struct {
     InstrBuf         *buf;
@@ -33,7 +41,24 @@ typedef struct {
     const char       *filename;
     int               had_error;
     int               next_tmp;   /* reset to SEMA_TMP_BASE per statement */
+
+    /* func-call support (NULL/0 when the program has no funcs) */
+    const Program    *prog;
+    const SemaResult  *sema;
+    CallSite          *call_sites;
+    int                call_site_count;
+    int                call_site_cap;
 } CGen;
+
+static void record_call_site(CGen *g, int instr_idx, const char *func_name) {
+    if (g->call_site_count >= g->call_site_cap) {
+        g->call_site_cap = g->call_site_cap ? g->call_site_cap * 2 : 8;
+        g->call_sites = realloc(g->call_sites, g->call_site_cap * sizeof *g->call_sites);
+    }
+    g->call_sites[g->call_site_count].instr_idx = instr_idx;
+    g->call_sites[g->call_site_count].func_name = strdup(func_name);
+    g->call_site_count++;
+}
 
 static void cg_err(CGen *g, int line, int col, const char *msg) {
     fprintf(stderr, "%s:%d:%d: codegen: %s\n",
@@ -107,6 +132,18 @@ static void patch_brnzp(InstrBuf *buf, int idx, int nzp, int sync_off, int branc
                   | ((uint32_t)(nzp & 0x7)     << 23)
                   | ((uint32_t)(sync_off   & 0x7FF) << 12)
                   | ((uint32_t)(branch_off & 0xFFF));
+    ibuf_patch(buf, idx, word);
+}
+
+/* Build and patch a CALL word (same B-type layout as BRnzp, opcode 0x1C,
+ * always-taken nzp=ALL -- see emit_call). sync_off==branch_off, matching
+ * the convention every other unconditional branch in this codegen already
+ * uses (e.g. STMT_IF's "unconditional skip"). */
+static void patch_call(InstrBuf *buf, int idx, int offset) {
+    uint32_t word = ((uint32_t)0x1C << 26)
+                  | ((uint32_t)0x7  << 23)
+                  | ((uint32_t)(offset & 0x7FF) << 12)
+                  | ((uint32_t)(offset & 0xFFF));
     ibuf_patch(buf, idx, word);
 }
 
@@ -304,6 +341,41 @@ static int eval_expr(CGen *g, const Expr *e) {
             return dst;
         }
 
+        case EXPR_CLAMP: {
+            int mark = g->next_tmp;
+            int xreg = eval_expr(g, e->clamp.x);
+            g->next_tmp = mark;
+            int dst  = alloc_tmp(g);
+            emit_clamp(g->buf, dst, xreg);
+            return dst;
+        }
+
+        case EXPR_CALL: {
+            /* Evaluate every argument into its own temp BEFORE moving any
+             * of them into the shared R14+ func window -- required for
+             * correctness when an argument is itself a nested call (which
+             * uses R14+ internally too): if we moved arg[0] into R14 and
+             * then evaluated arg[1] as a nested call, that nested call
+             * would clobber R14 before this call's own CALL even runs.
+             * Evaluating everything into the R20-27 temp pool first (no
+             * reset between args, only after) sidesteps that entirely. */
+            int mark = g->next_tmp;
+            int argregs[SEMA_FUNC_MAX_VARS];
+            for (int i = 0; i < e->call.arg_count; i++)
+                argregs[i] = eval_expr(g, e->call.args[i]);
+            for (int i = 0; i < e->call.arg_count; i++)
+                emit_mov(g->buf, SEMA_FUNC_REG_BASE + i, argregs[i]);
+            g->next_tmp = mark;
+
+            int call_idx = g->buf->count;
+            emit_call(g->buf, 0, 0);   /* placeholder; backpatched once every func's start PC is known */
+            record_call_site(g, call_idx, e->call.name);
+
+            int dst = alloc_tmp(g);
+            emit_mov(g->buf, dst, SEMA_FUNC_REG_RET);
+            return dst;
+        }
+
         default:
             cg_err(g, e->line, e->col, "unsupported expression kind");
             return R0;
@@ -493,8 +565,16 @@ static void emit_stmt(CGen *g, const Stmt *s) {
             break;
         }
 
+        /* return; (kernel, terminates the whole block) vs return expr;
+         * (func, moves the result into R19 then pops back to the caller). */
         case STMT_RETURN:
-            emit_ret(g->buf);
+            if (s->ret.val) {
+                int src = eval_expr(g, s->ret.val);
+                emit_mov(g->buf, SEMA_FUNC_REG_RET, src);
+                emit_sret(g->buf);
+            } else {
+                emit_ret(g->buf);
+            }
             break;
 
         /* mmio_matmul(a_base, b_base, c_base, M, N, K, scale);
@@ -564,11 +644,16 @@ int codegen(const Program *prog, const SemaResult *sema, InstrBuf *out) {
     ibuf_init(out);
 
     CGen g;
-    g.buf       = out;
-    g.syms      = &sema->kernels[0];
-    g.filename  = prog->filename;
-    g.had_error = 0;
-    g.next_tmp  = SEMA_TMP_BASE;
+    g.buf             = out;
+    g.syms            = &sema->kernels[0];
+    g.filename        = prog->filename;
+    g.had_error       = 0;
+    g.next_tmp        = SEMA_TMP_BASE;
+    g.prog            = prog;
+    g.sema            = sema;
+    g.call_sites      = NULL;
+    g.call_site_count = 0;
+    g.call_site_cap   = 0;
 
     /* Load kernel parameters from PARAM_BASE.. into their assigned
      * registers before the body runs. */
@@ -580,11 +665,43 @@ int codegen(const Program *prog, const SemaResult *sema, InstrBuf *out) {
     emit_stmtlist(&g, prog->kernels[0].body);
 
     /* Ensure the kernel ends with RET (guard against missing return). */
-    if (!g.had_error && out->count > 0) {
-        uint32_t last = out->instructions[out->count - 1];
-        if ((last >> 26) != 0x12)   /* 0x12 = RET opcode */
+    if (!g.had_error) {
+        if (out->count == 0 || (out->instructions[out->count - 1] >> 26) != 0x12)
             emit_ret(out);
     }
+
+    /* Every func's body is emitted after the kernel's own trailing RET --
+     * never reached by normal fallthrough (RET always terminates the
+     * kernel's thread first), only entered via CALL. Each func's body
+     * ends in SRET (emitted by its own `return expr;`, guaranteed present
+     * by sema.c), never RET, so there's no analogous guard needed here. */
+    int *func_start = prog->func_count > 0
+        ? malloc(prog->func_count * sizeof *func_start) : NULL;
+    for (int fi = 0; fi < prog->func_count && !g.had_error; fi++) {
+        func_start[fi] = out->count;
+        g.syms     = &sema->funcs[fi];
+        g.next_tmp = SEMA_TMP_BASE;
+        emit_stmtlist(&g, prog->funcs[fi].body);
+    }
+
+    /* Backpatch every CALL site now that every func's start PC is known
+     * (same two-pass shape STMT_IF/STMT_FOR already use within a single
+     * statement, just deferred across the whole program). */
+    for (int ci = 0; ci < g.call_site_count; ci++) {
+        int fi = -1;
+        for (int i = 0; i < prog->func_count; i++)
+            if (strcmp(prog->funcs[i].name, g.call_sites[ci].func_name) == 0) { fi = i; break; }
+        if (fi < 0) {
+            /* sema.c already rejects calls to undeclared funcs -- unreachable
+             * unless sema was skipped, but fail loudly rather than patch garbage. */
+            cg_err(&g, 0, 0, "internal error: call site references unknown func");
+        } else {
+            patch_call(out, g.call_sites[ci].instr_idx, func_start[fi] - g.call_sites[ci].instr_idx);
+        }
+        free(g.call_sites[ci].func_name);
+    }
+    free(g.call_sites);
+    free(func_start);
 
     return g.had_error ? 1 : 0;
 }

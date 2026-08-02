@@ -1,0 +1,26 @@
+// DS-CNN global max pool (one-shot, only one invocation in the graph).
+// Channel parallelism: launch with num_blocks=C/4, blockDim=4, so
+// channel = blockIdx*4 + threadIdx covers every channel (C=48 in this
+// model). Per channel, runs a straight max-reduction over all HW spatial
+// positions -- the same compare-branch idiom test_expif.axelc already
+// proved works (if nested inside for), just generalized from a 4-term
+// manual unroll (attn_softmax.axelc's row-max) to a real loop since HW=44
+// is too many terms to hand-unroll sensibly.
+//
+// No requantization here: TFLite's int8 MAX_POOL_2D path doesn't rescale
+// (max of int8 values is still a valid int8 value) as long as the real
+// input/output tensor scales match -- the host tool verifies that from the
+// real .tflite tensor list and would need to add a rescale step here if it
+// ever didn't, but for this model it does.
+//
+// Input layout: channel-planar (in_base + channel*HW + i).
+// Output layout: one value per channel (out_base + channel).
+kernel void dscnn_maxpool(int in_base, int out_base, int HW) {
+    int channel = blockIdx * 4 + threadIdx;
+    int base = in_base + channel * HW;
+    int best = mem[base];
+    for (int i = 1; i < HW; i++) {
+        if (mem[base + i] > best) { best = mem[base + i]; }
+    }
+    mem[out_base + channel] = best;
+}

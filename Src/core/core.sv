@@ -152,6 +152,17 @@ end
 logic [31:0] sync_pc;
 assign sync_pc = active_pc + {21'b0, sync_offset};
 
+logic call_en, sret_en;
+logic [31:0] call_return_pc;
+assign call_return_pc = active_pc + 32'd1;
+
+logic cs_push, cs_pop;
+logic [31:0] cs_top_return_pc;
+logic cs_stack_empty, cs_stack_full, cs_stack_overflow;
+
+assign cs_push = call_en & pc_en;
+assign cs_pop  = sret_en & pc_en;
+
 // ── Warp stack wires ─────────────────────────────────────────────────────────
 logic ws_push, ws_pop;
 logic [31:0] ws_top_sync_pc;
@@ -205,6 +216,19 @@ warp_stack #(
     .stack_overflow  (ws_stack_overflow)
 );
 
+// ── Call Stack ───────────────────────────────────────────────────────────────
+call_stack cs (
+    .clk             (clk),
+    .rst             (rst),
+    .push            (cs_push),
+    .push_return_pc  (call_return_pc),
+    .pop             (cs_pop),
+    .top_return_pc   (cs_top_return_pc),
+    .stack_empty     (cs_stack_empty),
+    .stack_full      (cs_stack_full),
+    .stack_overflow  (cs_stack_overflow)
+);
+
 // ── Fetcher ──────────────────────────────────────────────────────────────────
 fetcher fetch (
     .clk         (clk),
@@ -232,7 +256,8 @@ decoder dec (
     .sync_offset   (sync_offset),
     .branch_offset (branch_offset),
     .sync_en       (sync_en),
-
+    .call_en       (call_en),
+    .sret_en       (sret_en),
     .ret           (ret),
     .write_back_en (write_back_en_dec),
     .mem_read_en   (mem_read_en),
@@ -314,6 +339,9 @@ generate
             .pc_en         (pc_en & active_mask[i]),
             .branch_en     (branch_en),
             .branch_offset (branch_offset),
+            .call_en       (call_en),
+            .sret_en       (sret_en),
+            .sret_target   (cs_top_return_pc),
             .nzp_en        (nzp_en),
             .nzp_flag      (nzp_result[i]),
             .nzp_mask      (nzp_mask),

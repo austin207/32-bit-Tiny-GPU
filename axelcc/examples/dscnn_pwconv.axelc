@@ -1,0 +1,48 @@
+// DS-CNN pointwise (1x1) convolution, one compiled kernel reused across all
+// 4 depthwise-separable blocks via the kernel parameter ABI. A 1x1 conv is
+// just a per-pixel matmul over channels, so it's implemented as a dot4
+// channel-reduction: 4 input channels are loaded via 4 planar LDRs and
+// packed in-register (matching dot4's raw signed-int8-per-lane convention,
+// alu.sv dot_p0..p3), accumulated against a host-pre-packed weight word per
+// chunk of 4 input channels.
+//
+// Channel parallelism: launch with num_blocks=Cout/4, blockDim=4, so
+// oc = blockIdx*4 + threadIdx covers every output channel (Cout always a
+// multiple of 4 in this model).
+//
+// Input layout: channel-planar (CHW), 1 int8 per word, no padding needed
+// (1x1 kernel) -- in_base + channel*HW + pixel.
+// Weight layout: host-packed 4 input channels per word (Cin4 = Cin/4 words
+// per output channel) -- w_base + oc*Cin4 + chunk.
+// Output layout: channel-planar, 1 int8 per word -- out_base + oc*HW + pixel.
+//
+// Requantization: same per-output-channel clamp(((acc*mult[oc]+
+// 1<<(shift[oc]-1))>>shift[oc])+out_zp) scheme as dscnn_dwconv.axelc --
+// see that file for the full derivation (per-channel weight quantization,
+// round_bias derived in-kernel from shift). Both hoisted once per thread
+// since they're invariant across the pixel loop.
+kernel void dscnn_pwconv(
+    int in_base, int out_base, int w_base, int bias_eff_base,
+    int Cin4, int HW,
+    int mult_base, int shift_base, int out_zp
+) {
+    int oc = blockIdx * 4 + threadIdx;
+    int w_oc_base = oc * Cin4;
+    int oc_mult = mem[mult_base + oc];
+    int oc_shift = mem[shift_base + oc];
+
+    for (int pixel = 0; pixel < HW; pixel++) {
+        int acc = mem[bias_eff_base + oc];
+        for (int chunk = 0; chunk < Cin4; chunk++) {
+            acc = acc + dot4(
+                (mem[in_base + (chunk * 4 + 0) * HW + pixel] & 255)
+                | ((mem[in_base + (chunk * 4 + 1) * HW + pixel] & 255) << 8)
+                | ((mem[in_base + (chunk * 4 + 2) * HW + pixel] & 255) << 16)
+                | ((mem[in_base + (chunk * 4 + 3) * HW + pixel] & 255) << 24),
+                mem[w_base + w_oc_base + chunk]
+            );
+        }
+        mem[out_base + oc * HW + pixel] =
+            clamp(((acc * oc_mult + (1 << (oc_shift - 1))) >> oc_shift) + out_zp);
+    }
+}

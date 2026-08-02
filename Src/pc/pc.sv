@@ -6,6 +6,9 @@
     input logic pc_en,
     input logic branch_en,
     input logic [11:0] branch_offset,
+    input logic call_en,
+    input logic sret_en,
+    input logic [31:0] sret_target,
     input logic nzp_en,
     input logic [2:0] nzp_flag,
     input logic [2:0] nzp_mask,
@@ -29,7 +32,9 @@ always_ff @(posedge clk or posedge rst) begin
         if (nzp_en)
             nzp_reg <= nzp_flag;
         if (pc_en) begin
-            if (branch_en && (nzp_reg & nzp_mask) != 0)
+            if (sret_en)
+                pc_out <= sret_target;
+            else if (call_en || (branch_en && (nzp_reg & nzp_mask) != 0))
                 pc_out <= pc_out + {{20{branch_offset[11]}}, branch_offset};
             else
                 pc_out <= pc_out + 1;

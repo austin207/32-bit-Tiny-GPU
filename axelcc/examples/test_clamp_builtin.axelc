@@ -1,0 +1,18 @@
+// De-risking test for the newly wired EXPR_CLAMP codegen (opcode 0x18,
+// alu.sv: saturates to signed int8 range [-128, 127]). Same shape as
+// test_relu_builtin.axelc -- CLAMP was fully wired in hardware and decoded
+// already, just missing every layer of axelcc's own frontend/backend,
+// mirrored here exactly from the RELU precedent. This op is load-bearing
+// for the upcoming DS-CNN kernels' int8 requantization step, so it needs
+// its own proof on real RTL before any conv kernel depends on it.
+//
+// input:
+//   mem[0..3]
+//
+// output:
+//   mem[4..7]
+kernel void clamp_builtin() {
+    int tid = threadIdx;
+    int val = mem[tid];
+    mem[4 + tid] = clamp(val);
+}

@@ -126,6 +126,27 @@ static Expr **parse_args(Parser *p, int n) {
     return a;
 }
 
+/* Variable-arity call-argument list: name(a, b, c) — unlike parse_args
+ * above, the arity isn't known until the `)` is reached (parse_primary has
+ * no semantic knowledge of func declarations; sema.c checks arg_count
+ * against the callee's declared param_count later). Empty arg list (n==0)
+ * is legal (a niladic call). */
+static Expr **parse_call_args(Parser *p, int *out_count) {
+    if (!expect(p, TOK_LPAREN)) return NULL;
+    Expr **a = NULL;
+    int n = 0;
+    while (!check(p, TOK_RPAREN) && !check(p, TOK_EOF)) {
+        Expr *arg = parse_expr(p);
+        if (!arg) { free(a); return NULL; }
+        a = realloc(a, (n + 1) * sizeof *a);
+        a[n++] = arg;
+        if (!check(p, TOK_RPAREN) && !expect(p, TOK_COMMA)) { free(a); return NULL; }
+    }
+    if (!expect(p, TOK_RPAREN)) { free(a); return NULL; }
+    *out_count = n;
+    return a;
+}
+
 static Expr *parse_primary(Parser *p) {
     int line = p->cur.line, col = p->cur.col;
     switch (p->cur.type) {
@@ -158,9 +179,20 @@ static Expr *parse_primary(Parser *p) {
             Expr **a=parse_args(p,1); if (!a) return NULL;
             Expr *e=calloc(1,sizeof*e); e->kind=EXPR_RELU;
             e->line=line;e->col=col; e->relu.x=a[0]; free(a); return e; }
+        case TOK_CLAMP: { adv(p);
+            Expr **a=parse_args(p,1); if (!a) return NULL;
+            Expr *e=ast_clamp(a[0],line,col); free(a); return e; }
 
         case TOK_IDENT: {
             char *name=p->cur.text; p->cur.text=NULL; adv(p);
+            if (check(p, TOK_LPAREN)) {
+                int argc = 0;
+                Expr **args = parse_call_args(p, &argc);
+                if (p->had_error) { free(name); free(args); return NULL; }
+                Expr *e = ast_call(name, args, argc, line, col);
+                free(name);
+                return e;
+            }
             Expr *e=ast_ident(name,line,col); free(name); return e; }
 
         case TOK_LPAREN: {
@@ -267,8 +299,15 @@ static Stmt *parse_stmt(Parser *p) {
         }
         case TOK_RETURN:
             adv(p);
-            if (!expect(p,TOK_SEMICOLON)) return NULL;
-            return ast_return(line,col);
+            /* Kernel-style bare `return;` (val=NULL) vs func-style
+             * `return expr;` (val set) — distinguished by whether a `;`
+             * immediately follows, no separate syntax needed. */
+            if (check(p, TOK_SEMICOLON)) { adv(p); return ast_return(NULL, line, col); }
+            {
+                Expr *val = parse_expr(p); if (!val) return NULL;
+                if (!expect(p, TOK_SEMICOLON)) return NULL;
+                return ast_return(val, line, col);
+            }
         default:
             error_expected(p,"statement"); adv(p); return NULL;
     }
@@ -318,12 +357,52 @@ static Kernel *parse_kernel(Parser *p) {
     return k;
 }
 
+/* func int name(int p1, int p2, ...) { ... return expr; } — same shape as
+ * parse_kernel, but `int` return type (not `void`) instead of a fixed
+ * signature. Body must end with `return expr;`; checked in sema.c, not
+ * here (matches how e.g. STMT_IF's comparison-only condition is a sema
+ * check, not a parser restriction). */
+static Func *parse_func(Parser *p) {
+    int line=p->cur.line, col=p->cur.col;
+    if (!expect(p,TOK_FUNC)) return NULL;
+    if (!expect(p,TOK_INT))  return NULL;
+    char *name=eat_ident(p); if (!name) return NULL;
+    if (!expect(p,TOK_LPAREN)) { free(name); return NULL; }
+    Param *params=NULL; int pc=0;
+    while (!check(p,TOK_RPAREN)&&!check(p,TOK_EOF)) {
+        if (!expect(p,TOK_INT)) { free(name); free(params); return NULL; }
+        char *pn=eat_ident(p);
+        if (!pn) { free(name); free(params); return NULL; }
+        params=realloc(params,(pc+1)*sizeof*params);
+        params[pc++].name=pn;
+        if (!check(p,TOK_RPAREN)&&!expect(p,TOK_COMMA)) {
+            free(name); free(params); return NULL;
+        }
+    }
+    if (!expect(p,TOK_RPAREN)) { free(name); free(params); return NULL; }
+    if (!expect(p,TOK_LBRACE)) { free(name); free(params); return NULL; }
+    StmtList *body=parse_stmtlist(p);
+    if (!expect(p,TOK_RBRACE)) { free(name); free(params); return NULL; }
+    Func *f=calloc(1,sizeof*f);
+    f->name=name; f->params=params; f->param_count=pc;
+    f->body=body; f->line=line; f->col=col;
+    return f;
+}
+
 Program *parse(Lexer *lex) {
     Parser p; parser_init(&p,lex);
     Program *prog=calloc(1,sizeof*prog);
     prog->filename=lex->filename?strdup(lex->filename):NULL;
     while (!check(&p,TOK_EOF)) {
-        if (!check(&p,TOK_KERNEL)) { error_tok(&p,"expected 'kernel'"); break; }
+        if (check(&p,TOK_FUNC)) {
+            Func *f=parse_func(&p);
+            if (!f) { p.had_error=1; break; }
+            prog->funcs=realloc(prog->funcs,(prog->func_count+1)*sizeof*prog->funcs);
+            prog->funcs[prog->func_count++]=*f;
+            free(f);
+            continue;
+        }
+        if (!check(&p,TOK_KERNEL)) { error_tok(&p,"expected 'kernel' or 'func'"); break; }
         Kernel *k=parse_kernel(&p);
         if (!k) { p.had_error=1; break; }
         prog->kernels=realloc(prog->kernels,(prog->kernel_count+1)*sizeof*prog->kernels);

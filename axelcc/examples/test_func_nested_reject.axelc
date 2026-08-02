@@ -1,0 +1,17 @@
+// Negative test: a func body may not itself call another func (no nesting
+// -- every func shares the same physical register window R14-R19, so two
+// calls can never be safely "in flight" at once). This must FAIL to
+// compile; excluded from the `examples`/`golden` build exactly like
+// test_nestedif.axelc (axelcc/Makefile's EXAMPLES list).
+func int inner(int x) {
+    return x + 1;
+}
+
+func int outer(int x) {
+    return inner(x) + 1;
+}
+
+kernel void test_func_nested_reject(int base) {
+    int y = outer(1);
+    mem[base] = y;
+}
